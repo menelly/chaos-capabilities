@@ -34,6 +34,13 @@ Take what you need. No accounts, no telemetry, no crip tax.
    broke, in human words, where the user will see it.
 6. **The README is for the person who needs the tool, not for developers.** What it
    does, what it costs ($0), what leaves your machine (nothing), how to start it.
+7. **Append, never overwrite.** A pause is part of thinking, not the end of it.
+   Dictation that replaces everything you said before the pause punishes ND
+   composition patterns at their exact rhythm. New speech lands AFTER prior text,
+   the way typing always has.
+8. **The user's proper nouns are sacred.** Personal dictionary support wherever
+   speech is transcribed — nobody should flatten their vocabulary, their accent, or
+   their family's names to be understood by their own computer.
 
 ## Who
 
