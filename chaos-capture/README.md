@@ -16,6 +16,14 @@ existing, and decided it should be standard and free.
 
 ## How to use it
 
+The first time you start it, a friendly setup helper walks you through six
+quick questions — what you need (talking, listening, or both), which engine,
+light or dark, which look, and the names it should spell right. Every
+question has a fine default; you can press Next the whole way through. (Want
+it again later? ⚙ menu → **🪄 Setup helper**.)
+
+After that:
+
 1. Start Chaos Capture. A button appears in the corner of your screen.
 2. Click in whatever you were writing (email, document, chat — anything).
 3. Press **Ctrl+Alt+D** (or click the big button) and talk.

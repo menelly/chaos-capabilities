@@ -325,6 +325,226 @@ def windows_theme():
     except Exception:
         return "dark"
 
+
+def system_ram_gb():
+    try:
+        import ctypes
+        class MEM(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong),
+                        ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+        m = MEM(); m.dwLength = ctypes.sizeof(MEM)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))
+        return m.ullTotalPhys / (1024 ** 3)
+    except Exception:
+        return 0
+
+
+# ---------------------------------------------------------------- onboarding
+# First-run wizard: one question per screen, big text, big buttons, no
+# menus to find. "Grandma Jane doesn't have to figure anything out" (Ren,
+# 2026-08-14). Runs once; re-run anytime from the gear menu -> Setup helper.
+
+class Wizard:
+    F_TITLE = ("Segoe UI", 16, "bold")
+    F_BODY = ("Segoe UI", 12)
+    F_BTN = ("Segoe UI", 12)
+
+    def __init__(self, app):
+        self.app = app
+        self.answers = {"engine": "windows", "theme_pref": "auto",
+                        "skin": "illustrated", "features": "both",
+                        "words": ""}
+        self.win = tk.Toplevel(app.root)
+        self.win.title("Welcome to Chaos Capture")
+        self.win.attributes("-topmost", True)
+        self.win.geometry("560x480")
+        self.win.configure(bg="white")
+        self.frame = None
+        self.step = 0
+        self.steps = [self.s_welcome, self.s_features, self.s_engine,
+                      self.s_theme, self.s_skin, self.s_words, self.s_done]
+        self.show()
+
+    def _clear(self):
+        if self.frame:
+            self.frame.destroy()
+        self.frame = tk.Frame(self.win, bg="white")
+        self.frame.pack(fill="both", expand=True, padx=28, pady=20)
+
+    def _nav(self, next_ok=True, last=False):
+        bar = tk.Frame(self.frame, bg="white")
+        bar.pack(side="bottom", fill="x", pady=(16, 0))
+        if self.step > 0:
+            tk.Button(bar, text="◀ Back", font=self.F_BTN, padx=14, pady=6,
+                      command=self.back).pack(side="left")
+        tk.Button(bar, text=("Finish ✔" if last else "Next ▶"),
+                  font=self.F_BTN, padx=20, pady=6, bg="#d63e6c",
+                  fg="white", activebackground="#b83259",
+                  command=(self.finish if last else self.next)
+                  ).pack(side="right")
+
+    def _title(self, text):
+        tk.Label(self.frame, text=text, font=self.F_TITLE, bg="white",
+                 wraplength=490, justify="left").pack(anchor="w")
+
+    def _body(self, text):
+        tk.Label(self.frame, text=text, font=self.F_BODY, bg="white",
+                 wraplength=490, justify="left").pack(anchor="w", pady=(8, 4))
+
+    def _radios(self, key, options):
+        var = tk.StringVar(value=self.answers[key])
+        for value, label in options:
+            tk.Radiobutton(self.frame, text=label, variable=var, value=value,
+                           font=self.F_BODY, bg="white", anchor="w",
+                           wraplength=460, justify="left",
+                           pady=6).pack(anchor="w", fill="x")
+        self.vars = getattr(self, "vars", {})
+        self.vars[key] = var
+
+    def show(self):
+        self._clear()
+        self.steps[self.step]()
+
+    def next(self):
+        for k, v in getattr(self, "vars", {}).items():
+            self.answers[k] = v.get()
+        self.vars = {}
+        if hasattr(self, "words_box"):
+            try:
+                self.answers["words"] = self.words_box.get("1.0", "end").strip()
+            except Exception:
+                pass
+            del self.words_box
+        self.step += 1
+        self.show()
+
+    def back(self):
+        self.vars = {}
+        self.step -= 1
+        self.show()
+
+    # ---- screens
+    def s_welcome(self):
+        self._title("Hi! Let's set this up together. 🎙️")
+        self._body("Chaos Capture lets you TALK instead of type, and have "
+                   "your computer READ things out loud to you.\n\n"
+                   "Six quick questions, all with fine default answers — "
+                   "you can just press Next the whole way if you like. "
+                   "Nothing here is permanent; there's a Setup helper in "
+                   "the ⚙ menu to change your mind later.")
+        self._nav()
+
+    def s_features(self):
+        self._title("What would you like?")
+        self._radios("features", [
+            ("both", "🎙️🔊 Both — talking instead of typing, AND having "
+                     "things read aloud to me"),
+            ("stt", "🎙️ Just talking instead of typing"),
+            ("tts", "🔊 Just having things read aloud to me")])
+        self._nav()
+
+    def s_engine(self):
+        self._title("Which speech engine for understanding you?")
+        self._body("Both are free and both stay on your computer.")
+        self._radios("engine", [
+            ("windows", "Built-in Windows speech — works right now, "
+                        "nothing to download. Makes more mistakes."),
+            ("brain", "🧠 The better brain — one-time ~180MB download, "
+                      "noticeably more accurate. Recommended if your "
+                      "internet can manage it.")])
+        ram = system_ram_gb()
+        cores = os.cpu_count() or 2
+        if ram:
+            verdict = ("Your computer can handle the better brain "
+                       "comfortably. 👍" if ram >= 7 and cores >= 4 else
+                       "Your computer is on the modest side — the better "
+                       "brain will still work, just a little slower. The "
+                       "built-in engine is the zippy choice.")
+            self._body(f"(I peeked: {ram:.0f}GB memory, {cores} cores. "
+                       f"{verdict})")
+        if self.answers["features"] == "tts":
+            self._body("(You picked read-aloud only, so this barely "
+                       "matters — feel free to just press Next.)")
+        self._nav()
+
+    def s_theme(self):
+        self._title("Light mode or dark mode?")
+        self._radios("theme_pref", [
+            ("auto", "🌗 Match my Windows setting (recommended)"),
+            ("light", "☀️ Always light"),
+            ("dark", "🌙 Always dark")])
+        self._nav()
+
+    def s_skin(self):
+        self._title("Which look?")
+        self._radios("skin", [
+            ("illustrated", "🎨 Illustrated — warm painted cards"),
+            ("simple", "🔲 Simple — big plain shapes, maximum contrast "
+                       "(easier for low vision)")])
+        self._nav()
+
+    def s_words(self):
+        self._title("Any names it should spell correctly?")
+        self._body("Type the names and words it might not know — your "
+                   "family, your doctor, your medications, your town. One "
+                   "per line. Totally fine to leave empty and add later "
+                   "(⚙ menu → My dictionary).")
+        self.words_box = tk.Text(self.frame, height=7, font=self.F_BODY,
+                                 wrap="word")
+        self.words_box.pack(fill="both", expand=True, pady=(4, 0))
+        self.words_box.insert("1.0", self.answers["words"])
+        self._nav()
+
+    def s_done(self):
+        if hasattr(self, "words_box"):
+            pass
+        self._title("That's everything! 🎉")
+        self._body("The little widget lives in the corner of your screen. "
+                   "The cheat sheet:\n\n"
+                   "🎙️  Ctrl+Alt+D — or click the big button — to talk\n"
+                   "🔊  Ctrl+Alt+R — read whatever you copied out loud\n"
+                   "⚙  Ctrl+Alt+M — the menu (size, looks, dictionary)\n"
+                   "─  Ctrl+Alt+H — shrink it out of the way\n"
+                   "⠿  drag it anywhere, or Ctrl+Alt+arrows\n\n"
+                   "Click into whatever you're writing, talk, and your "
+                   "words appear. That's the whole thing. Enjoy!")
+        self._nav(last=True)
+
+    def next_with_words(self):
+        pass
+
+    def finish(self):
+        a = self.answers
+        app = self.app
+        app.theme_pref = a["theme_pref"]
+        app.skin = a["skin"]
+        app.features = a["features"]
+        app.onboarded = True
+        words = [w.strip() for w in a["words"].splitlines()
+                 if w.strip() and not w.startswith("#")]
+        if words:
+            existing = ""
+            if os.path.exists(DICT_PATH):
+                with open(DICT_PATH, encoding="utf-8") as f:
+                    existing = f.read()
+            with open(DICT_PATH, "a", encoding="utf-8") as f:
+                for w in words:
+                    if w not in existing:
+                        f.write(w + "\n")
+        app._save_settings()
+        app._apply_features()
+        app._refresh()
+        self.win.destroy()
+        if a["engine"] == "brain" and not have_brain():
+            app._offer_brain()
+
 # ---------------------------------------------------------------- app
 
 class App:
@@ -335,6 +555,8 @@ class App:
         self.theme_pref = "auto"
         self.skin = "illustrated"   # "illustrated" (Nova's art) | "simple"
         self.saved_pos = None       # remembered screen position
+        self.features = "both"      # "both" | "stt" | "tts"
+        self.onboarded = False      # first-run wizard shown yet?
         self.imgs = {}
         self._load_settings()
 
@@ -416,6 +638,7 @@ class App:
             except Exception as e:
                 print(f"(no global hotkeys: {e} — clicking still works)")
 
+        self._apply_features()
         self._refresh()
         root.update_idletasks()
         if self.saved_pos:
@@ -425,6 +648,19 @@ class App:
             root.geometry(f"+{sw - root.winfo_width() - 40}"
                           f"+{sh - root.winfo_height() - 90}")
         self._no_steal_focus()
+        if not self.onboarded:
+            root.after(400, lambda: Wizard(self))
+
+    def _apply_features(self):
+        """Show only what this user asked for: stt hides the read bar,
+        tts hides the talk card. Chosen in the wizard, changeable there."""
+        self.card.pack_forget()
+        self.read_btn.pack_forget()
+        if self.features in ("both", "stt"):
+            self.card.pack()
+        if self.features in ("both", "tts"):
+            self.read_btn.pack(fill="x")
+        self.root.update_idletasks()
 
     # -------- move / minimize / close (the "it's blocking my stuff" suite)
     def nudge(self, dx, dy):
@@ -493,6 +729,8 @@ class App:
             self.scale = float(s.get("scale", 1.0))
             self.theme_pref = s.get("theme_pref", "auto")
             self.skin = s.get("skin", "illustrated")
+            self.features = s.get("features", "both")
+            self.onboarded = bool(s.get("onboarded", False))
             p = s.get("pos")
             if (isinstance(p, list) and len(p) == 2
                     and all(isinstance(v, int) for v in p)):
@@ -506,6 +744,8 @@ class App:
                 json.dump({"scale": self.scale,
                            "theme_pref": self.theme_pref,
                            "skin": self.skin,
+                           "features": self.features,
+                           "onboarded": self.onboarded,
                            "pos": (list(self.saved_pos)
                                    if self.saved_pos else None)}, f)
         except Exception:
@@ -671,6 +911,8 @@ class App:
         m.add_separator()
         m.add_command(label="📖 My dictionary (names it should spell right)",
                       command=self._edit_dictionary)
+        m.add_command(label="🪄 Setup helper (the welcome questions again)",
+                      command=lambda: Wizard(self))
         if self.rec.engine == "windows":
             m.add_separator()
             if have_brain():
