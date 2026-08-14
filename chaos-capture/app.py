@@ -334,6 +334,7 @@ class App:
         self.scale = 1.0
         self.theme_pref = "auto"
         self.skin = "illustrated"   # "illustrated" (Nova's art) | "simple"
+        self.saved_pos = None       # remembered screen position
         self.imgs = {}
         self._load_settings()
 
@@ -342,11 +343,36 @@ class App:
         root.wm_attributes("-transparentcolor", KEYCOL)
         root.configure(bg=KEYCOL)
 
-        self.gear = tk.Label(root, text=" ⚙ menu ", fg="#9a86b8",
+        # Header strip: drag handle + minimize + menu + close. All visible,
+        # all left-clickable, all with keyboard twins — because "the widget
+        # is blocking something and I can't move it" is a real one-handed
+        # failure Ren hit on 2026-08-14. Grab ANY part of the widget to drag.
+        self.header = tk.Frame(root, bg="#221833")
+        self.header.pack(fill="x")
+        self.grip = tk.Label(self.header, text=" ⠿ drag ", fg="#9a86b8",
+                             bg="#221833", font=("Segoe UI", 10),
+                             cursor="fleur")
+        self.grip.pack(side="left")
+        self.close_btn = tk.Label(self.header, text=" ✕ ", fg="#9a86b8",
+                                  bg="#221833", font=("Segoe UI", 10),
+                                  cursor="hand2")
+        self.close_btn.pack(side="right")
+        self.close_btn.bind("<ButtonRelease-1>", lambda e: root.destroy())
+        self.gear = tk.Label(self.header, text=" ⚙ ", fg="#9a86b8",
                              bg="#221833", font=("Segoe UI", 10),
                              cursor="hand2")
-        self.gear.pack(anchor="e")
+        self.gear.pack(side="right")
         self.gear.bind("<ButtonRelease-1>", self._menu)
+        self.min_btn = tk.Label(self.header, text=" ─ ", fg="#9a86b8",
+                                bg="#221833", font=("Segoe UI", 10),
+                                cursor="hand2")
+        self.min_btn.pack(side="right")
+        self.min_btn.bind("<ButtonRelease-1>", lambda e: self.minimize())
+        self.dot = None  # the minimized state's tiny dot
+        for w in (self.header, self.grip):
+            w.bind("<ButtonPress-1>", self._press)
+            w.bind("<B1-Motion>", self._drag)
+            w.bind("<ButtonRelease-1>", self._end_drag)
 
         self.card = tk.Label(root, bg=KEYCOL, bd=0, cursor="hand2")
         self.card.pack()
@@ -357,7 +383,9 @@ class App:
 
         self.read_btn = tk.Label(root, bg=KEYCOL, bd=0, cursor="hand2")
         self.read_btn.pack(fill="x")
-        self.read_btn.bind("<ButtonRelease-1>", lambda e: self.read_clipboard())
+        self.read_btn.bind("<ButtonPress-1>", self._press)
+        self.read_btn.bind("<B1-Motion>", self._drag)
+        self.read_btn.bind("<ButtonRelease-1>", self._release_read)
 
         root.bind("<Escape>", lambda e: self._cancel())
         self._drag_start, self._moved = None, False
@@ -369,17 +397,93 @@ class App:
                 keyboard.add_hotkey("ctrl+alt+r", self.read_clipboard)
                 keyboard.add_hotkey("ctrl+alt+m",
                                     lambda: root.after(0, self._menu_kb))
-                keyboard.add_hotkey("esc",
-                                    lambda: root.after(0, self._cancel))
+                keyboard.add_hotkey("ctrl+alt+h",
+                                    lambda: root.after(0, self.minimize))
+                keyboard.add_hotkey("ctrl+alt+q",
+                                    lambda: root.after(0, root.destroy))
+                for arrow, dx, dy in (("left", -40, 0), ("right", 40, 0),
+                                      ("up", 0, -40), ("down", 0, 40)):
+                    keyboard.add_hotkey(
+                        f"ctrl+alt+{arrow}",
+                        lambda dx=dx, dy=dy: root.after(
+                            0, lambda: self.nudge(dx, dy)))
+                for num, corner in (("1", "tl"), ("2", "tr"),
+                                    ("3", "bl"), ("4", "br")):
+                    keyboard.add_hotkey(
+                        f"ctrl+alt+{num}",
+                        lambda c=corner: root.after(
+                            0, lambda: self.snap(c)))
             except Exception as e:
                 print(f"(no global hotkeys: {e} — clicking still works)")
 
         self._refresh()
         root.update_idletasks()
-        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-        root.geometry(f"+{sw - root.winfo_width() - 40}"
-                      f"+{sh - root.winfo_height() - 90}")
+        if self.saved_pos:
+            root.geometry(f"+{self.saved_pos[0]}+{self.saved_pos[1]}")
+        else:
+            sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+            root.geometry(f"+{sw - root.winfo_width() - 40}"
+                          f"+{sh - root.winfo_height() - 90}")
         self._no_steal_focus()
+
+    # -------- move / minimize / close (the "it's blocking my stuff" suite)
+    def nudge(self, dx, dy):
+        self.root.geometry(f"+{self.root.winfo_x() + dx}"
+                           f"+{self.root.winfo_y() + dy}")
+        self._save_pos()
+
+    def snap(self, corner):
+        self.root.update_idletasks()
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        w, h = self.root.winfo_width(), self.root.winfo_height()
+        x = 20 if corner in ("tl", "bl") else sw - w - 20
+        y = 20 if corner in ("tl", "tr") else sh - h - 70
+        self.root.geometry(f"+{x}+{y}")
+        self._save_pos()
+
+    def minimize(self):
+        """Collapse to a tiny dot (or restore). The dot stays on top, can be
+        dragged, and one click — or Ctrl+Alt+H again — brings the widget
+        back. Out of the way without being gone."""
+        if self.dot:
+            self.dot.destroy(); self.dot = None
+            self.root.deiconify()
+            self._no_steal_focus()
+            return
+        self.root.withdraw()
+        d = tk.Toplevel(self.root)
+        d.overrideredirect(True)
+        d.wm_attributes("-topmost", True)
+        lbl = tk.Label(d, text=" 🎙 ", bg="#221833", fg="#9a86b8",
+                       font=("Segoe UI", 11), cursor="hand2")
+        lbl.pack()
+        x = self.root.winfo_x()
+        y = self.root.winfo_y()
+        d.geometry(f"+{x}+{y}")
+        drag = {"s": None}
+        def press(e): drag["s"] = (e.x, e.y); drag["moved"] = False
+        def move(e):
+            if drag["s"]:
+                dx, dy = e.x - drag["s"][0], e.y - drag["s"][1]
+                if abs(dx) + abs(dy) > 3:
+                    drag["moved"] = True
+                    d.geometry(f"+{d.winfo_x() + dx}+{d.winfo_y() + dy}")
+        def release(e):
+            if not drag.get("moved"):
+                self.minimize()  # click restores
+            drag["s"] = None
+        lbl.bind("<ButtonPress-1>", press)
+        lbl.bind("<B1-Motion>", move)
+        lbl.bind("<ButtonRelease-1>", release)
+        self.dot = d
+
+    def _save_pos(self):
+        self.saved_pos = (self.root.winfo_x(), self.root.winfo_y())
+        self._save_settings()
+
+    def _end_drag(self, e):
+        self._drag_start = None
+        self._save_pos()
 
     # -------- settings
     def _load_settings(self):
@@ -389,6 +493,10 @@ class App:
             self.scale = float(s.get("scale", 1.0))
             self.theme_pref = s.get("theme_pref", "auto")
             self.skin = s.get("skin", "illustrated")
+            p = s.get("pos")
+            if (isinstance(p, list) and len(p) == 2
+                    and all(isinstance(v, int) for v in p)):
+                self.saved_pos = tuple(p)
         except Exception:
             pass
 
@@ -397,7 +505,9 @@ class App:
             with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
                 json.dump({"scale": self.scale,
                            "theme_pref": self.theme_pref,
-                           "skin": self.skin}, f)
+                           "skin": self.skin,
+                           "pos": (list(self.saved_pos)
+                                   if self.saved_pos else None)}, f)
         except Exception:
             pass
 
@@ -454,6 +564,15 @@ class App:
     def _release(self, e):
         if not self._moved:
             self.toggle()
+        else:
+            self._save_pos()
+        self._drag_start = None
+
+    def _release_read(self, e):
+        if not self._moved:
+            self.read_clipboard()
+        else:
+            self._save_pos()
         self._drag_start = None
 
     def toggle(self):

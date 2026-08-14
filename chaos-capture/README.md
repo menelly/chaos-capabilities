@@ -30,8 +30,14 @@ That's the whole thing.
 |---|---|---|
 | Click the big button | `Ctrl+Alt+D` | start / finish a take |
 | Click the "read aloud" bar | `Ctrl+Alt+R` | your computer reads the clipboard to you |
-| Click the ⚙ | `Ctrl+Alt+M` | menu: size, theme, keep-mic-warm, quit |
+| Click the ⚙ | `Ctrl+Alt+M` | menu: size, theme, dictionary, better brain, quit |
+| Drag anywhere on the widget | `Ctrl+Alt+arrows` | move it (arrows nudge it along) |
+| — | `Ctrl+Alt+1/2/3/4` | jump it to a corner (1=top-left, 2=top-right, 3=bottom-left, 4=bottom-right) |
+| Click the ─ | `Ctrl+Alt+H` | shrink to a tiny dot (click the dot, or press again, to bring it back) |
+| Click the ✕ | `Ctrl+Alt+Q` | quit |
 | — | `Esc` | cancel a take (nothing is typed) |
+
+It remembers where you put it, how big you made it, and which look you chose.
 
 Every control works by mouse **or** keyboard, because some days you only
 have one of those.
