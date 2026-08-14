@@ -106,6 +106,41 @@ def transcribe_windows(wav_path, hotwords):
     return (r.stdout or "").strip()
 
 
+# ---- the opt-in "better brain": whisper.cpp + a small local model.
+# NOT bundled with the app — the user presses a button, sees what will be
+# downloaded and how big it is, and chooses. Phone-sized model, runs on
+# modest CPUs. Once present, it's used automatically. Delete the brain/
+# folder to go back to the built-in engine.
+BRAIN_DIR = os.path.join(HERE, "brain")
+BRAIN_ZIP_URL = ("https://github.com/ggerganov/whisper.cpp/releases/latest/"
+                 "download/whisper-bin-x64.zip")
+BRAIN_MODEL_URL = ("https://huggingface.co/ggerganov/whisper.cpp/resolve/"
+                   "main/ggml-base.en.bin")
+BRAIN_MODEL = os.path.join(BRAIN_DIR, "ggml-base.en.bin")
+
+
+def brain_exe():
+    for name in ("whisper-cli.exe", "main.exe"):
+        p = os.path.join(BRAIN_DIR, name)
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def have_brain():
+    return brain_exe() is not None and os.path.exists(BRAIN_MODEL)
+
+
+def transcribe_brain(wav_path, hotwords):
+    cmd = [brain_exe(), "-m", BRAIN_MODEL, "-f", wav_path,
+           "-nt", "-np", "-l", "en"]
+    if hotwords:
+        cmd += ["--prompt", hotwords]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
+                       creationflags=subprocess.CREATE_NO_WINDOW)
+    return (r.stdout or "").strip()
+
+
 _WIN_TTS_PS = r"""
 Add-Type -AssemblyName System.Speech
 $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
@@ -196,6 +231,8 @@ class Recorder:
         try:
             if self.engine == "local":
                 return transcribe_local(wav_path, self._dictionary())
+            if self.engine == "windows" and have_brain():
+                return transcribe_brain(wav_path, self._dictionary())
             return transcribe_windows(wav_path, self._dictionary())
         except Exception as e:
             print(f"transcription failed: {e.__class__.__name__}: {e}")
@@ -513,8 +550,110 @@ class App:
                    "Keep mic warm: off (click to hold open)"),
             command=lambda: self.rec.set_warm(not warm))
         m.add_separator()
+        m.add_command(label="📖 My dictionary (names it should spell right)",
+                      command=self._edit_dictionary)
+        if self.rec.engine == "windows":
+            m.add_separator()
+            if have_brain():
+                m.add_command(label="🧠 Better brain: installed ✓ (in use)",
+                              command=lambda: None)
+            else:
+                m.add_command(
+                    label="🧠 Get better accuracy (one-time ~180MB download)",
+                    command=self._offer_brain)
+        m.add_separator()
         m.add_command(label="Quit Chaos Capture", command=self.root.destroy)
         m.tk_popup(e.x_root, e.y_root)
+
+    def _edit_dictionary(self):
+        """Open the personal dictionary in Notepad — the editor everyone
+        already knows. Commercial dictation charges a fortune for custom
+        vocabulary; here it is a text file. Changes apply on your next take."""
+        if not os.path.exists(DICT_PATH):
+            with open(DICT_PATH, "w", encoding="utf-8") as f:
+                f.write(
+                    "# Your personal dictionary — one word or phrase per "
+                    "line.\n"
+                    "# Put in the names the app keeps getting wrong: your\n"
+                    "# family, your doctors, your medications, your fandom.\n"
+                    "# Lines starting with # are ignored. Save this file and\n"
+                    "# your next dictation take will know these words.\n"
+                    "#\n"
+                    "# Examples (delete these and add your own):\n"
+                    "# Dr. Martinez\n"
+                    "# fibromyalgia\n"
+                    "# Kaladin\n")
+        try:
+            os.startfile(DICT_PATH)  # opens in Notepad (or their default)
+        except Exception as e:
+            print(f"couldn't open the dictionary: {e} — it lives at "
+                  f"{DICT_PATH}")
+
+    # -------- the opt-in better brain
+    def _offer_brain(self):
+        import tkinter.messagebox as mb
+        ok = mb.askyesno(
+            "Get better accuracy?",
+            "This downloads a small, free, open-source speech engine\n"
+            "(whisper.cpp) and a compact English model (~180MB total).\n\n"
+            "It runs entirely ON YOUR COMPUTER — nothing is sent\n"
+            "anywhere, ever. It is noticeably more accurate than the\n"
+            "built-in Windows engine and works fine on modest machines.\n\n"
+            "Download now?")
+        if ok:
+            threading.Thread(target=self._download_brain, daemon=True).start()
+
+    def _download_brain(self):
+        import urllib.request, zipfile, io
+
+        win = [None]
+
+        def ui():
+            w = tk.Toplevel(self.root)
+            w.title("Downloading the better brain...")
+            w.attributes("-topmost", True)
+            lbl = tk.Label(w, text="starting...", font=("Segoe UI", 11),
+                           padx=24, pady=18)
+            lbl.pack()
+            win[0] = (w, lbl)
+        self.root.after(0, ui)
+        while win[0] is None:
+            time.sleep(0.05)
+        w, lbl = win[0]
+
+        def say(msg):
+            self.root.after(0, lambda: lbl.config(text=msg))
+
+        try:
+            os.makedirs(BRAIN_DIR, exist_ok=True)
+            say("Downloading engine (step 1 of 2)...")
+            data = urllib.request.urlopen(BRAIN_ZIP_URL, timeout=60).read()
+            zf = zipfile.ZipFile(io.BytesIO(data))
+            for name in zf.namelist():
+                base = os.path.basename(name)
+                if base and (base.endswith(".exe") or base.endswith(".dll")):
+                    with open(os.path.join(BRAIN_DIR, base), "wb") as f:
+                        f.write(zf.read(name))
+            say("Downloading model (step 2 of 2)...\nThis is the big one "
+                "(~148MB) — a few minutes on slow internet.")
+
+            def hook(blocks, bsize, total):
+                if total > 0:
+                    pct = min(100, blocks * bsize * 100 // total)
+                    say(f"Downloading model (step 2 of 2)... {pct}%")
+            urllib.request.urlretrieve(BRAIN_MODEL_URL, BRAIN_MODEL, hook)
+
+            if have_brain():
+                say("Done! The better brain is installed and will be\n"
+                    "used automatically from your next take. 🎉")
+            else:
+                say("Download finished but something is missing —\n"
+                    "delete the 'brain' folder and try again.")
+        except Exception as e:
+            say(f"Download failed: {e.__class__.__name__}.\n"
+                "Check your internet and try again — the app still\n"
+                "works with the built-in engine meanwhile.")
+        self.root.after(6000, w.destroy)
 
     def _set(self, attr, val):
         setattr(self, attr, val)

@@ -38,21 +38,29 @@ have one of those.
 
 ## The dictionary (make it spell YOUR words right)
 
-Open `dictionary.txt` and add your proper nouns — your doctor, your meds,
-your D&D character. The speech engine wasn't raised on your life; this file
-introduces it. One word or phrase per line.
+⚙ menu → **📖 My dictionary**. It opens a plain text file in Notepad: add
+your proper nouns — your doctor, your meds, your D&D character — one per
+line, save, done. Your next dictation take knows them. The speech engine
+wasn't raised on your life; this file introduces it.
 
-## Two engines, honestly compared
+(Commercial dictation software charges hundreds of dollars for custom
+vocabulary. Here it is a text file, because that's all it ever was.)
+
+## Three brains, honestly compared
 
 | | accuracy | needs |
 |---|---|---|
-| `--engine local` | very good | `pip install faster-whisper` + a reasonably strong computer (a GPU helps a lot) |
-| `--engine windows` | okay | **nothing** — uses speech recognition built into Windows |
+| built-in Windows engine | okay | **nothing** — works the moment you start the app |
+| 🧠 **the better brain** (⚙ menu button) | good | one-time ~180MB download, chosen by you; runs fine on modest machines |
+| faster-whisper (from source) | best | `pip install faster-whisper` + a strong computer (GPU helps a lot) |
 
-The default (`--engine auto`) uses the good one if it's installed and falls
-back to the built-in one if not. The built-in engine is older technology and
-will make more mistakes — but it runs on any Windows machine with zero
-downloads, and *possible* beats *perfect*.
+The app starts on whatever's available and upgrades itself automatically
+when a better brain is present. The **🧠 Get better accuracy** button in the
+⚙ menu downloads a small, free, open-source engine (whisper.cpp) and a
+compact model — entirely on your computer, nothing sent anywhere, and you
+can undo it by deleting the `brain` folder. The built-in engine will make
+more mistakes — but it runs on any Windows machine with zero downloads,
+and *possible* beats *perfect*.
 
 ## Two looks, both first-class
 
