@@ -1,0 +1,5 @@
+build/
+dist/
+__pycache__/
+*.spec
+capture_settings.json

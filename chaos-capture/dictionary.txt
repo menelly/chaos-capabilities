@@ -1,0 +1,11 @@
+# Chaos Capture personal dictionary
+# One word or phrase per line. These get handed to the speech engine as
+# "hotwords" so it spells YOUR proper nouns right — family names, your
+# doctors, your medications, your fandom. The engine was not raised on
+# your life; this file introduces it.
+#
+# Examples (replace with your own):
+# Dr. Martinez
+# fibromyalgia
+# Genshin
+# Kaladin
