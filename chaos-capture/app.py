@@ -822,7 +822,10 @@ class App:
                 keyboard.add_hotkey("ctrl+alt+r",
                                     lambda: root.after(0, self.read_clipboard))
                 keyboard.add_hotkey("ctrl+alt+m",
-                                    lambda: root.after(0, self._menu_kb))
+                                    lambda: root.after(0, self._menu_kb),
+                                    suppress=True)  # swallow the keystroke:
+                # other apps bind Ctrl+Alt+M too (Claude Code flips its
+                # permission mode!) and must not ALSO react to our menu key
                 keyboard.add_hotkey("ctrl+alt+h",
                                     lambda: root.after(0, self.minimize))
                 keyboard.add_hotkey("ctrl+alt+q",
