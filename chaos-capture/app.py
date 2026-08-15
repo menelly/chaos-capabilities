@@ -56,6 +56,19 @@ MAX_SECONDS = 240
 HERE = (os.path.dirname(sys.executable) if getattr(sys, "frozen", False)
         else os.path.dirname(os.path.abspath(__file__)))
 SETTINGS_PATH = os.path.join(HERE, "capture_settings.json")
+LOG_PATH = os.path.join(HERE, "capture_log.txt")
+
+
+def log(msg):
+    """print() + a real file beside the exe, because windowed EXEs eat
+    stdout and a mute app cannot be debugged from a phone photo."""
+    line = time.strftime("[%H:%M:%S] ") + str(msg)
+    print(line)
+    try:
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
 DICT_PATH = os.path.join(HERE, "dictionary.txt")
 
 # ---------------------------------------------------------------- engines
@@ -522,7 +535,8 @@ class Wizard:
 
     def __init__(self, app):
         self.app = app
-        self.answers = {"engine": "windows", "theme_pref": "auto",
+        self.answers = {"engine": "windows", "bt_helper": "no",
+                        "theme_pref": "auto",
                         "skin": "illustrated", "features": "both",
                         "words": "", "tts_engine": app.tts_engine}
         self.win = tk.Toplevel(app.root)
@@ -533,8 +547,8 @@ class Wizard:
         self.frame = None
         self.step = 0
         self.steps = [self.s_welcome, self.s_features, self.s_engine,
-                      self.s_voice, self.s_theme, self.s_skin, self.s_words,
-                      self.s_done]
+                      self.s_voice, self.s_bluetooth, self.s_theme,
+                      self.s_skin, self.s_words, self.s_done]
         self.show()
 
     def _clear(self):
@@ -600,7 +614,7 @@ class Wizard:
         self._title("Hi! Let's set this up together. 🎙️")
         self._body("Chaos Capture lets you TALK instead of type, and have "
                    "your computer READ things out loud to you.\n\n"
-                   "Seven quick questions, all with fine default answers — "
+                   "Eight quick questions, all with fine default answers — "
                    "you can just press Next the whole way if you like. "
                    "Nothing here is permanent; there's a Setup helper in "
                    "the ⚙ menu to change your mind later.")
@@ -660,6 +674,25 @@ class Wizard:
         if self.answers["features"] == "stt":
             self._body("(You picked talking-only, so this doesn't matter — "
                        "just press Next.)")
+        self._nav()
+
+    def s_bluetooth(self):
+        self._title("Do you use Bluetooth hearing aids or headphones?")
+        already = have_bt_refresh_task()
+        if already:
+            self._body("Your computer already has the Bluetooth fixer set "
+                       "up. The 🔄 button will be on the card — tap it "
+                       "whenever a device is connected but acting deaf. "
+                       "Nothing to do here; press Next.")
+            self._radios("bt_helper", [("no", "OK! (already set up)")])
+        else:
+            self._body("Bluetooth audio has a classic failure: connected, "
+                       "but silently deaf. One tap of our 🔄 button fixes it "
+                       "— but setting that up needs ONE Windows admin OK.")
+            self._radios("bt_helper", [
+                ("yes", "🎧 Yes — set up the one-tap Bluetooth fixer when "
+                        "we finish (Windows will ask once, say Yes)"),
+                ("no", "No Bluetooth here — skip it")])
         self._nav()
 
     def s_theme(self):
@@ -748,6 +781,8 @@ class Wizard:
                 set_shortcut("desktop", True)
             if self.v_startup.get():
                 set_shortcut("startup", True)
+        if a.get("bt_helper") == "yes" and not have_bt_refresh_task():
+            app.root.after(400, app._setup_refresh)
         if a["tts_engine"] in ("inworld", "elevenlabs"):
             import voices
             if not voices.load_key(a["tts_engine"]):
@@ -844,12 +879,7 @@ class App:
         self.bt_btn = tk.Label(self.header, text=" 🔄", fg="#9a86b8",
                                bg="#221833", font=HDR_FONT, cursor="hand2")
         # 🔄 packs only if the helper task exists (see the startup probe)
-        self.bt_btn.bind("<ButtonRelease-1>", lambda e: threading.Thread(
-            target=lambda: subprocess.run(
-                ["schtasks", "/run", "/tn", "BluetoothRefresh"],
-                capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW),
-            daemon=True).start())
+        self.bt_btn.bind("<ButtonRelease-1>", lambda e: self._do_bt_refresh())
         self.close_btn = tk.Label(self.header, text="✕ ", fg="#9a86b8",
                                   bg="#221833", font=HDR_FONT, cursor="hand2")
         self.close_btn.pack(side="right")
@@ -1262,12 +1292,7 @@ class App:
                 elif hit == "warm":
                     self.toggle_warm()
                 elif hit == "refresh":
-                    threading.Thread(
-                        target=lambda: subprocess.run(
-                            ["schtasks", "/run", "/tn", "BluetoothRefresh"],
-                            capture_output=True,
-                            creationflags=subprocess.CREATE_NO_WINDOW),
-                        daemon=True).start()
+                    self._do_bt_refresh()
                 elif hit == "menu":
                     self._menu(e)
             else:
@@ -1330,7 +1355,7 @@ class App:
                     ("ctrl", "alt", "shift", "d")):
                 time.sleep(0.05)
             keyboard.send("ctrl+v")
-        print(f"→ {text}")
+        log(f"transcribed {len(text)} chars: {text[:80]}")
 
     def _cancel(self):
         if self.rec.recording:
@@ -1785,13 +1810,40 @@ class App:
             pass
         self.root.destroy()
 
+    def _do_bt_refresh(self):
+        """Run the bounce WITH visible feedback: the 🔄 goes green while the
+        radio bounces (a mute button reads as a dead button — Ren, one
+        dozen clicks, 8/15)."""
+        log("BT refresh: bouncing radio via helper task")
+        try:
+            self.bt_btn.config(fg="#4ade80")
+            self.root.after(15000, lambda: self.bt_btn.config(
+                fg=getattr(self, "_hdr", {}).get("fg", "#9a86b8")))
+        except Exception:
+            pass
+        threading.Thread(
+            target=lambda: subprocess.run(
+                ["schtasks", "/run", "/tn", "BluetoothRefresh"],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW),
+            daemon=True).start()
+
     def _setup_refresh(self):
         """One UAC yes → the promptless bounce helper exists → the 🔄 button
         appears everywhere it belongs. (Ren, 8/15: 'why did we not just
         build the same bouncing option for everybody?' No reason. Built.)"""
+        from tkinter import messagebox
+        messagebox.showinfo(
+            "One admin OK needed",
+            "Windows is about to show a permission box (it may flash on the "
+            "taskbar or appear behind windows — look for the shield icon).\n\n"
+            "Say YES to it, and the Bluetooth refresh button will appear.")
         def worker():
+            log("BT helper setup: launching elevated installer...")
             ok = setup_bt_refresh()
+            log(f"BT helper setup result: {'INSTALLED' if ok else 'NOT installed'}")
             def done():
+                from tkinter import messagebox
                 if ok:
                     self._has_refresh = True
                     self.imgs = {k: v for k, v in self.imgs.items()
@@ -1801,11 +1853,18 @@ class App:
                     except Exception:
                         pass
                     self._refresh()
-                    print("🔄 Bluetooth refresh helper installed — the button "
-                          "now lives on the card and header.")
+                    messagebox.showinfo(
+                        "Bluetooth refresh ready ✓",
+                        "The 🔄 button is now on the card and the top strip. "
+                        "Tap it whenever a Bluetooth device is connected but "
+                        "acting deaf — everything re-handshakes in ~15 seconds.")
                 else:
-                    print("(helper not installed — the admin prompt may have "
-                          "been declined. The menu row will offer it again.)")
+                    messagebox.showwarning(
+                        "Not set up",
+                        "The helper didn't install — the admin box may have "
+                        "been closed or declined. The menu row will offer it "
+                        "again anytime.\n\nDetails: capture_log.txt next to "
+                        "the app.")
             self.root.after(0, done)
         threading.Thread(target=worker, daemon=True).start()
 
