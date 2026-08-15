@@ -677,7 +677,7 @@ class Wizard:
         self._nav()
 
     def s_bluetooth(self):
-        self._title("Do you use Bluetooth hearing aids or headphones?")
+        self._title("Do you use Bluetooth audio? (earbuds, headphones, hearing aids)")
         already = have_bt_refresh_task()
         if already:
             self._body("Your computer already has the Bluetooth fixer set "
@@ -1633,8 +1633,8 @@ class App:
                    "Keep mic warm: off (click to hold open)"),
             command=self.toggle_warm)
         if not getattr(self, "_has_refresh", False):
-            m.add_command(label="🔄 Set up Bluetooth refresh (fixes stale "
-                                "hearing-aid links — one admin OK)",
+            m.add_command(label="🔄 Set up Bluetooth refresh (fixes 'connected "
+                                "but silent' Bluetooth — one admin OK)",
                           command=self._setup_refresh)
         m.add_separator()
         m.add_command(label="⌨ Keyboard shortcuts (a reminder card)",
