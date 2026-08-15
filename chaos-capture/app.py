@@ -557,6 +557,8 @@ class App:
         self.saved_pos = None       # remembered screen position
         self.features = "both"      # "both" | "stt" | "tts"
         self.onboarded = False      # first-run wizard shown yet?
+        self.tts_engine = "windows" # "windows" | "inworld" | "elevenlabs"
+        self.tts_voice = None       # None = engine default
         self.imgs = {}
         self._load_settings()
 
@@ -731,6 +733,8 @@ class App:
             self.skin = s.get("skin", "illustrated")
             self.features = s.get("features", "both")
             self.onboarded = bool(s.get("onboarded", False))
+            self.tts_engine = s.get("tts_engine", "windows")
+            self.tts_voice = s.get("tts_voice") or None
             p = s.get("pos")
             if (isinstance(p, list) and len(p) == 2
                     and all(isinstance(v, int) for v in p)):
@@ -746,6 +750,8 @@ class App:
                            "skin": self.skin,
                            "features": self.features,
                            "onboarded": self.onboarded,
+                           "tts_engine": getattr(self, "tts_engine", "windows"),
+                           "tts_voice": getattr(self, "tts_voice", None),
                            "pos": (list(self.saved_pos)
                                    if self.saved_pos else None)}, f)
         except Exception:
@@ -874,7 +880,124 @@ class App:
             text = self.root.clipboard_get()
         except Exception:
             print("clipboard is empty — copy something first."); return
-        speak_windows(text)
+        if self.tts_engine == "windows" and not self.tts_voice:
+            speak_windows(text)   # the original zero-frills path
+            return
+        import voices
+        threading.Thread(target=voices.speak,
+                         args=(text, self.tts_engine, self.tts_voice),
+                         daemon=True).start()
+
+    # -------- voice settings (BYO-key tiers, 2026-08-15)
+    def _voice_settings(self):
+        """Engine picker + key entry + voice list. Windows voices stay the
+        default; Inworld/ElevenLabs are bring-your-own-key — the key goes
+        straight from this machine to the provider, DPAPI-encrypted on disk,
+        never to us."""
+        import voices
+        from tkinter import ttk
+        d = tk.Toplevel(self.root)
+        d.title("Read-aloud voice")
+        d.attributes("-topmost", True)
+        d.resizable(False, False)
+        pad = {"padx": 12, "pady": 4}
+
+        tk.Label(d, text="Who should read to you?",
+                 font=("Segoe UI", 12, "bold")).pack(anchor="w", **pad)
+        eng_var = tk.StringVar(value=self.tts_engine)
+        for eng in voices.ENGINES:
+            tk.Radiobutton(d, text=voices.ENGINE_LABELS[eng], value=eng,
+                           variable=eng_var, font=("Segoe UI", 11),
+                           command=lambda: refresh()).pack(anchor="w", **pad)
+
+        key_frame = tk.Frame(d)
+        tk.Label(key_frame, text="Your API key:",
+                 font=("Segoe UI", 10)).pack(side="left")
+        key_var = tk.StringVar()
+        key_entry = tk.Entry(key_frame, textvariable=key_var, show="•",
+                             width=34, font=("Segoe UI", 10))
+        key_entry.pack(side="left", padx=6)
+        status = tk.Label(d, text="", font=("Segoe UI", 9), wraplength=340,
+                          justify="left")
+        note = tk.Label(d, text="", font=("Segoe UI", 9), fg="#666666",
+                        wraplength=340, justify="left")
+
+        tk.Label(d, text="Voice:", font=("Segoe UI", 10)).pack(anchor="w", **pad)
+        voice_box = ttk.Combobox(d, state="readonly", width=40)
+        voice_box.pack(**pad)
+        vmap = {}   # label -> voice id
+
+        def load_voices():
+            eng = eng_var.get()
+            if eng == "windows":
+                vs = voices.list_windows_voices()
+            else:
+                vs = voices.cached_catalog(eng)
+            vmap.clear()
+            labels = ["(default)"]
+            for vid, label in vs:
+                vmap[label] = vid
+                labels.append(label)
+            voice_box["values"] = labels
+            cur = "(default)"
+            for label, vid in vmap.items():
+                if vid == self.tts_voice:
+                    cur = label
+            voice_box.set(cur)
+
+        def refresh():
+            eng = eng_var.get()
+            if eng == "windows":
+                key_frame.pack_forget(); status.pack_forget(); note.pack_forget()
+            else:
+                key_frame.pack(anchor="w", **pad)
+                status.pack(anchor="w", **pad)
+                note.config(text=("Needs your own account with the provider — "
+                                  "their pricing, billed to you. The key stays "
+                                  "on this computer, encrypted; it is never "
+                                  "sent to us."))
+                note.pack(anchor="w", **pad)
+                if voices.load_key(eng):
+                    status.config(text="A key is already saved ✓ (paste a new "
+                                       "one to replace it)", fg="#2e7d32")
+                else:
+                    status.config(text="No key saved yet.", fg="#666666")
+            load_voices()
+
+        def test_and_save():
+            eng = eng_var.get()
+            key = key_var.get().strip() or (voices.load_key(eng) or "")
+            if not key:
+                status.config(text="Paste a key first.", fg="#c62828"); return
+            status.config(text="Testing… (you should hear a hello)",
+                          fg="#666666")
+            d.update_idletasks()
+            def worker():
+                ok, msg = voices.test_key(eng, key)
+                def done():
+                    status.config(text=msg,
+                                  fg=("#2e7d32" if ok else "#c62828"))
+                    if ok:
+                        load_voices()
+                self.root.after(0, done)
+            threading.Thread(target=worker, daemon=True).start()
+
+        btns = tk.Frame(d)
+        tk.Button(btns, text="Test key (says hello)", font=("Segoe UI", 10),
+                  command=test_and_save).pack(side="left", padx=4)
+
+        def save():
+            self.tts_engine = eng_var.get()
+            sel = voice_box.get()
+            self.tts_voice = vmap.get(sel)   # "(default)" -> None
+            self._save_settings()
+            d.destroy()
+        tk.Button(btns, text="Save", font=("Segoe UI", 10, "bold"),
+                  command=save).pack(side="left", padx=4)
+        tk.Button(btns, text="Cancel", font=("Segoe UI", 10),
+                  command=d.destroy).pack(side="left", padx=4)
+        btns.pack(pady=10)
+        refresh()
 
     # -------- menu
     def _menu_kb(self):
@@ -909,6 +1032,8 @@ class App:
                    "Keep mic warm: off (click to hold open)"),
             command=lambda: self.rec.set_warm(not warm))
         m.add_separator()
+        m.add_command(label="🗣 Read-aloud voice (pick who reads to you)",
+                      command=self._voice_settings)
         m.add_command(label="📖 My dictionary (names it should spell right)",
                       command=self._edit_dictionary)
         m.add_command(label="🪄 Setup helper (the welcome questions again)",
