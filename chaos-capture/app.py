@@ -99,10 +99,8 @@ def transcribe_windows(wav_path, hotwords):
     # Windows' built-in recognizer. Honest note: it is older tech and less
     # accurate than Whisper — but it runs on ANY Windows machine with zero
     # downloads, and for many people "possible" beats "perfect."
-    r = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", _WIN_STT_PS, wav_path],
-        capture_output=True, text=True, timeout=120,
-        creationflags=subprocess.CREATE_NO_WINDOW)
+    import voices
+    r = voices.run_ps(_WIN_STT_PS, wav_path, timeout=120)
     return (r.stdout or "").strip()
 
 
@@ -155,9 +153,9 @@ def speak_windows(text):
     f = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False,
                                     encoding="utf-8")
     f.write(text); f.close()
-    subprocess.Popen(
-        ["powershell", "-NoProfile", "-Command", _WIN_TTS_PS, f.name],
-        creationflags=subprocess.CREATE_NO_WINDOW)
+    import voices
+    threading.Thread(target=voices.run_ps, args=(_WIN_TTS_PS, f.name),
+                     daemon=True).start()
 
 # ---------------------------------------------------------------- recorder
 
@@ -170,8 +168,10 @@ class Recorder:
         self.flowing = False
         self.cancelled = False
         self.warm = False
+        self.last_frame_at = 0.0
 
     def _callback(self, indata, n, t, status):
+        self.last_frame_at = time.time()   # liveness heartbeat (BT health ring)
         if self.recording:
             if not self.flowing:
                 self.flowing = True
@@ -259,10 +259,32 @@ BAR_FILES = {"idle": "bar_read_idle.png", "think": "bar_read_think.png",
 # swappable faces plus keep-warm / refresh / menu ON the card. Buttons were
 # rendered separately from the background so we composite them ourselves.
 # Fractions of card width/height, from the approved layout mockups.
-V2_DIR = os.path.join(ART_DIR, "v2")
+# Theme folders (Ren's structure, 8/15): art/v2/<theme>/ — every theme
+# folder holds the SAME filenames (background, micon, off, thinking, read,
+# keepwarm, refresh, menu, lost_banner). Adding a theme = dropping in a
+# folder. Zero code changes, ever again.
+V2_ROOT = os.path.join(ART_DIR, "v2")
 V2_ASPECT = 747 / 560
+
+
+def v2_themes():
+    try:
+        return sorted(
+            d for d in os.listdir(V2_ROOT)
+            if os.path.exists(os.path.join(V2_ROOT, d, "background.png")))
+    except Exception:
+        return []
+
+
+def v2_dir(theme):
+    return os.path.join(V2_ROOT, theme)
 V2_STATE_ART = {"off": "off.png", "on": "micon.png", "think": "thinking.png"}
-V2_SB = (0.50, 0.482, 0.241)              # big state button: cx, cy, r-of-width
+# TWO state buttons side by side (Ren, 8/15: "otherwise grandma has to know
+# the hotkeys and can't click"): LISTEN on the left, READ ALOUD on the right.
+# Identity stays visible (mic vs speaker art); state shows as glow — the read
+# button sleeps dimmed until it's speaking.
+V2_MIC = (0.28, 0.45, 0.179)              # cx(of w), cy(of h), r(of w)
+V2_READ = (0.72, 0.45, 0.179)
 V2_AUX3 = {"warm": (0.245, 0.75, 0.098),  # with refresh available
            "refresh": (0.50, 0.75, 0.098),
            "menu": (0.755, 0.75, 0.098)}
@@ -271,7 +293,7 @@ V2_AUX2 = {"warm": (0.34, 0.75, 0.098),   # refresh helper not installed
 
 
 def have_v2():
-    return os.path.exists(os.path.join(V2_DIR, "background.png"))
+    return bool(v2_themes())
 
 
 def have_bt_refresh_task():
@@ -390,7 +412,7 @@ class Wizard:
         self.app = app
         self.answers = {"engine": "windows", "theme_pref": "auto",
                         "skin": "illustrated", "features": "both",
-                        "words": ""}
+                        "words": "", "tts_engine": app.tts_engine}
         self.win = tk.Toplevel(app.root)
         self.win.title("Welcome to Chaos Capture")
         self.win.attributes("-topmost", True)
@@ -399,7 +421,8 @@ class Wizard:
         self.frame = None
         self.step = 0
         self.steps = [self.s_welcome, self.s_features, self.s_engine,
-                      self.s_theme, self.s_skin, self.s_words, self.s_done]
+                      self.s_voice, self.s_theme, self.s_skin, self.s_words,
+                      self.s_done]
         self.show()
 
     def _clear(self):
@@ -465,7 +488,7 @@ class Wizard:
         self._title("Hi! Let's set this up together. 🎙️")
         self._body("Chaos Capture lets you TALK instead of type, and have "
                    "your computer READ things out loud to you.\n\n"
-                   "Six quick questions, all with fine default answers — "
+                   "Seven quick questions, all with fine default answers — "
                    "you can just press Next the whole way if you like. "
                    "Nothing here is permanent; there's a Setup helper in "
                    "the ⚙ menu to change your mind later.")
@@ -502,6 +525,25 @@ class Wizard:
         if self.answers["features"] == "tts":
             self._body("(You picked read-aloud only, so this barely "
                        "matters — feel free to just press Next.)")
+        self._nav()
+
+    def s_voice(self):
+        self._title("Whose voice should read to you?")
+        self._radios("tts_engine", [
+            ("windows", "🔊 The built-in Windows voice — free, works right "
+                        "now, nothing to set up. (Recommended to start.)"),
+            ("inworld", "🎭 Inworld — hundreds of natural voices. Needs "
+                        "your own Inworld account and key (their pricing, "
+                        "billed to you)."),
+            ("elevenlabs", "🎤 ElevenLabs — very natural voices. Needs your "
+                           "own ElevenLabs account and key (their pricing, "
+                           "billed to you).")])
+        self._body("Pick one of the key options and I'll ask for the key "
+                   "when we finish. Change your mind anytime: ⚙ menu → "
+                   "🗣 Read-aloud voice.")
+        if self.answers["features"] == "stt":
+            self._body("(You picked talking-only, so this doesn't matter — "
+                       "just press Next.)")
         self._nav()
 
     def s_theme(self):
@@ -556,6 +598,7 @@ class Wizard:
         app.theme_pref = a["theme_pref"]
         app.skin = a["skin"]
         app.features = a["features"]
+        app.tts_engine = a["tts_engine"]
         app.onboarded = True
         words = [w.strip() for w in a["words"].splitlines()
                  if w.strip() and not w.startswith("#")]
@@ -574,6 +617,12 @@ class Wizard:
         self.win.destroy()
         if a["engine"] == "brain" and not have_brain():
             app._offer_brain()
+        if a["tts_engine"] in ("inworld", "elevenlabs"):
+            import voices
+            if not voices.load_key(a["tts_engine"]):
+                # they chose a key-engine in the wizard — keep the promise
+                # and ask for the key right now, not someday
+                app.root.after(300, app._voice_settings)
 
 # ---------------------------------------------------------------- app
 
@@ -584,23 +633,48 @@ class App:
         self.scale = 1.0
         self.theme_pref = "auto"
         self.skin = "illustrated"   # "illustrated" (Nova's art) | "simple"
+        self.v2_theme = "nebula"    # which art/v2/<theme>/ folder
         self.saved_pos = None       # remembered screen position
         self.features = "both"      # "both" | "stt" | "tts"
         self.onboarded = False      # first-run wizard shown yet?
         self.tts_engine = "windows" # "windows" | "inworld" | "elevenlabs"
         self.tts_voice = None       # None = engine default
+        self.read_active = False    # read-aloud running (card button glows)
         self.imgs = {}
         self._load_settings()
 
         # v2 card: probe once (in the background — schtasks is slow) whether
         # the BT-refresh helper exists; the 🔄 button only draws if it does.
+        # Ambient mic-link health for the green ring around 🔄. Honest tiers:
+        # open stream + fresh frames = PROVEN alive; no stream = "Windows
+        # sees a microphone" (best knowable without opening one).
+        self.bt_ok = False
+        def _bt_poll():
+            ok = False
+            try:
+                if self.rec.stream:
+                    ok = (time.time() -
+                          getattr(self.rec, "last_frame_at", 0)) < 2.5
+                else:
+                    ok = sd.query_devices(kind="input") is not None
+            except Exception:
+                ok = False
+            if ok != self.bt_ok:
+                self.bt_ok = ok
+                self._refresh()
+            self.root.after(3000, _bt_poll)
+        self.root.after(1500, _bt_poll)
+
         self._has_refresh = False
         def _probe():
             if have_bt_refresh_task():
                 self._has_refresh = True
                 self.imgs = {k: v for k, v in self.imgs.items()
                              if not (isinstance(k, tuple) and k[0] == "v2")}
-                self.root.after(0, self._refresh)
+                def show():
+                    self.bt_btn.pack(side="left", after=self.warm_btn)
+                    self._refresh()
+                self.root.after(0, show)
         threading.Thread(target=_probe, daemon=True).start()
 
         root.overrideredirect(True)
@@ -608,29 +682,51 @@ class App:
         root.wm_attributes("-transparentcolor", KEYCOL)
         root.configure(bg=KEYCOL)
 
-        # Header strip: drag handle + minimize + menu + close. All visible,
-        # all left-clickable, all with keyboard twins — because "the widget
-        # is blocking something and I can't move it" is a real one-handed
-        # failure Ren hit on 2026-08-14. Grab ANY part of the widget to drag.
-        self.header = tk.Frame(root, bg="#221833")
-        self.header.pack(fill="x")
-        self.grip = tk.Label(self.header, text=" ⠿ drag ", fg="#9a86b8",
-                             bg="#221833", font=("Segoe UI", 10),
-                             cursor="fleur")
+        # Header strip: ⠿ 🎙 🔊 🔥 [🔄] | ─ ⚙ ✕ — every control visible, big
+        # (13pt Grandma-sized targets), left-clickable, with keyboard twins.
+        # Born of two real one-handed failures: "it's blocking something and
+        # I can't move it" (8/14) and "I didn't know that button existed"
+        # (8/15 — invisible states read as broken).
+        HDR_FONT = ("Segoe UI", 13)
+        self.header = tk.Frame(root, bg="#221833", height=36)
+        self.header.pack()
+        self.header.pack_propagate(False)   # width clamped to the art in
+        # _refresh, so the strip's edges line up with the card's edges
+        # (Ren, 8/15: misaligned edges are not "good enough")
+        self.grip = tk.Label(self.header, text=" ⠿ ", fg="#9a86b8",
+                             bg="#221833", font=HDR_FONT, cursor="fleur")
         self.grip.pack(side="left")
-        self.close_btn = tk.Label(self.header, text=" ✕ ", fg="#9a86b8",
-                                  bg="#221833", font=("Segoe UI", 10),
-                                  cursor="hand2")
+        self.mic_btn = tk.Label(self.header, text="🎙", fg="#9a86b8",
+                                bg="#221833", font=HDR_FONT, cursor="hand2")
+        self.mic_btn.pack(side="left")
+        self.mic_btn.bind("<ButtonRelease-1>", lambda e: self.toggle())
+        self.read_hdr = tk.Label(self.header, text=" 🔊", fg="#9a86b8",
+                                 bg="#221833", font=HDR_FONT, cursor="hand2")
+        self.read_hdr.pack(side="left")
+        self.read_hdr.bind("<ButtonRelease-1>", lambda e: self.read_clipboard())
+        self.warm_btn = tk.Label(self.header, text=" 🔥", fg="#5a4a6e",
+                                 bg="#221833", font=HDR_FONT, cursor="hand2")
+        self.warm_btn.pack(side="left")
+        self.warm_btn.bind("<ButtonRelease-1>", lambda e: self.toggle_warm())
+        self.bt_btn = tk.Label(self.header, text=" 🔄", fg="#9a86b8",
+                               bg="#221833", font=HDR_FONT, cursor="hand2")
+        # 🔄 packs only if the helper task exists (see the startup probe)
+        self.bt_btn.bind("<ButtonRelease-1>", lambda e: threading.Thread(
+            target=lambda: subprocess.run(
+                ["schtasks", "/run", "/tn", "BluetoothRefresh"],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW),
+            daemon=True).start())
+        self.close_btn = tk.Label(self.header, text="✕ ", fg="#9a86b8",
+                                  bg="#221833", font=HDR_FONT, cursor="hand2")
         self.close_btn.pack(side="right")
-        self.close_btn.bind("<ButtonRelease-1>", lambda e: root.destroy())
+        self.close_btn.bind("<ButtonRelease-1>", lambda e: self.shutdown())
         self.gear = tk.Label(self.header, text=" ⚙ ", fg="#9a86b8",
-                             bg="#221833", font=("Segoe UI", 10),
-                             cursor="hand2")
+                             bg="#221833", font=HDR_FONT, cursor="hand2")
         self.gear.pack(side="right")
         self.gear.bind("<ButtonRelease-1>", self._menu)
-        self.min_btn = tk.Label(self.header, text=" ─ ", fg="#9a86b8",
-                                bg="#221833", font=("Segoe UI", 10),
-                                cursor="hand2")
+        self.min_btn = tk.Label(self.header, text="─ ", fg="#9a86b8",
+                                bg="#221833", font=HDR_FONT, cursor="hand2")
         self.min_btn.pack(side="right")
         self.min_btn.bind("<ButtonRelease-1>", lambda e: self.minimize())
         self.dot = None  # the minimized state's tiny dot
@@ -659,13 +755,14 @@ class App:
             try:
                 keyboard.add_hotkey("ctrl+alt+d",
                                     lambda: root.after(0, self.toggle))
-                keyboard.add_hotkey("ctrl+alt+r", self.read_clipboard)
+                keyboard.add_hotkey("ctrl+alt+r",
+                                    lambda: root.after(0, self.read_clipboard))
                 keyboard.add_hotkey("ctrl+alt+m",
                                     lambda: root.after(0, self._menu_kb))
                 keyboard.add_hotkey("ctrl+alt+h",
                                     lambda: root.after(0, self.minimize))
                 keyboard.add_hotkey("ctrl+alt+q",
-                                    lambda: root.after(0, root.destroy))
+                                    lambda: root.after(0, self.shutdown))
                 for arrow, dx, dy in (("left", -40, 0), ("right", 40, 0),
                                       ("up", 0, -40), ("down", 0, 40)):
                     keyboard.add_hotkey(
@@ -696,13 +793,18 @@ class App:
 
     def _apply_features(self):
         """Show only what this user asked for: stt hides the read bar,
-        tts hides the talk card. Chosen in the wizard, changeable there."""
+        tts hides the talk card. Chosen in the wizard, changeable there.
+        With the v2 card, read-aloud lives on the header 🔊 (and Ctrl+Alt+R),
+        so the separate bar only appears for read-aloud-ONLY users — for
+        everyone else it would just repeat the header button."""
         self.card.pack_forget()
         self.read_btn.pack_forget()
         if self.features in ("both", "stt"):
             self.card.pack()
         if self.features in ("both", "tts"):
-            self.read_btn.pack(fill="x")
+            if not (have_v2() and self.skin == "illustrated"
+                    and self.features == "both"):
+                self.read_btn.pack(fill="x")
         self.root.update_idletasks()
 
     # -------- move / minimize / close (the "it's blocking my stuff" suite)
@@ -733,9 +835,14 @@ class App:
         d = tk.Toplevel(self.root)
         d.overrideredirect(True)
         d.wm_attributes("-topmost", True)
-        lbl = tk.Label(d, text=" 🎙 ", bg="#221833", fg="#9a86b8",
+        # The dot SAYS what clicking it does — a mystery dot fails the
+        # Grandma test (field-tested by Ren, 8/15, who minimized the local
+        # build and couldn't find the way back).
+        lbl = tk.Label(d, text=" 🎙 open ", bg="#221833", fg="#c9b8e8",
                        font=("Segoe UI", 11), cursor="hand2")
         lbl.pack()
+        lbl.bind("<Enter>", lambda e: lbl.config(bg="#3a2d54"))
+        lbl.bind("<Leave>", lambda e: lbl.config(bg="#221833"))
         x = self.root.winfo_x()
         y = self.root.winfo_y()
         d.geometry(f"+{x}+{y}")
@@ -776,6 +883,9 @@ class App:
             self.onboarded = bool(s.get("onboarded", False))
             self.tts_engine = s.get("tts_engine", "windows")
             self.tts_voice = s.get("tts_voice") or None
+            self.v2_theme = s.get("v2_theme", self.v2_theme)
+            if self.v2_theme not in v2_themes() and v2_themes():
+                self.v2_theme = v2_themes()[0]
             p = s.get("pos")
             if (isinstance(p, list) and len(p) == 2
                     and all(isinstance(v, int) for v in p)):
@@ -793,6 +903,7 @@ class App:
                            "onboarded": self.onboarded,
                            "tts_engine": getattr(self, "tts_engine", "windows"),
                            "tts_voice": getattr(self, "tts_voice", None),
+                           "v2_theme": getattr(self, "v2_theme", "nebula"),
                            "pos": (list(self.saved_pos)
                                    if self.saved_pos else None)}, f)
         except Exception:
@@ -806,29 +917,49 @@ class App:
         return V2_AUX3 if getattr(self, "_has_refresh", False) else V2_AUX2
 
     def _img_v2(self, w):
-        """Nova's v2 composite: nebula background + the ONE state button +
-        keep-warm / (refresh) / menu. Cached per (state, warm, width)."""
+        """Nova's v2 composite: nebula background + LISTEN and READ ALOUD
+        buttons side by side + keep-warm / (refresh) / menu. Cached per
+        (mic-state, reading?, warm, width)."""
         warm = getattr(self.rec, "warm", False)
-        key = ("v2", self.state, warm, w)
+        reading = getattr(self, "read_active", False)
+        key = ("v2", self.v2_theme, self.state, reading, warm,
+               getattr(self, "bt_ok", False), w)
         if key not in self.imgs:
             h = int(w * V2_ASPECT)
-            bg = Image.open(os.path.join(V2_DIR, "background.png")).convert("RGBA")
+            tdir = v2_dir(self.v2_theme)
+            bg = Image.open(os.path.join(tdir, "background.png")).convert("RGBA")
             c = bg.resize((w, h), Image.LANCZOS)
 
             def put(name, cx, cy, r, dim=False):
                 d = int(2 * r * w)
-                im = Image.open(os.path.join(V2_DIR, name)).convert("RGBA")
+                im = Image.open(os.path.join(tdir, name)).convert("RGBA")
                 im.thumbnail((d, d), Image.LANCZOS)
-                if dim:   # keep-warm off = flame sleeping
-                    a = im.getchannel("A").point(lambda v: int(v * 0.45))
+                if dim:   # sleeping state: present but clearly not active
+                    a = im.getchannel("A").point(lambda v: int(v * 0.68))
                     im.putalpha(a)
                 c.alpha_composite(im, (int(cx * w - im.width / 2),
                                        int(cy * h - im.height / 2)))
 
-            put(V2_STATE_ART[self.state], *V2_SB)
+            put(V2_STATE_ART[self.state], *V2_MIC)
+            put("read.png", *V2_READ, dim=not reading)
             aux = self._v2_aux()
             put("keepwarm.png", *aux["warm"], dim=not warm)
             if "refresh" in aux:
+                if getattr(self, "bt_ok", False):
+                    # green halo = the microphone link is verifiably alive
+                    # RIGHT NOW (audio frames flowing, or Windows sees the
+                    # mic). Ren, 8/15: "sometimes it's hard to know if it's
+                    # there." A good state deserves a visible name too.
+                    cx, cy, r = aux["refresh"]
+                    gx, gy = cx * w, cy * h
+                    ring = Image.new("RGBA", c.size, (0, 0, 0, 0))
+                    rd = ImageDraw.Draw(ring)
+                    for i, alpha in ((6, 60), (4, 110), (2, 200)):
+                        rr = r * w + i
+                        rd.ellipse([gx - rr, gy - rr, gx + rr, gy + rr],
+                                   outline=(74, 222, 128, alpha),
+                                   width=3)
+                    c.alpha_composite(ring)
                 put("refresh.png", *aux["refresh"])
             put("menu.png", *aux["menu"])
             flat = Image.new("RGBA", c.size, KEYCOL)
@@ -841,6 +972,7 @@ class App:
         art = have_art() and self.skin == "illustrated"
         if self.skin == "illustrated" and have_v2():
             self.card.configure(image=self._img_v2(w))
+            self._clamp_header(w)
         else:
             key = (self.theme(), self.state, w, art)
             if key not in self.imgs:
@@ -855,6 +987,7 @@ class App:
                 flat.alpha_composite(im)
                 self.imgs[key] = ImageTk.PhotoImage(flat.convert("RGB"))
             self.card.configure(image=self.imgs[key])
+            self._clamp_header(w)
         bkey = ("bar", self.theme(), w, art)
         if bkey not in self.imgs:
             if art:
@@ -869,8 +1002,41 @@ class App:
             self.imgs[bkey] = ImageTk.PhotoImage(flat.convert("RGB"))
         self.read_btn.configure(image=self.imgs[bkey])
 
+    def _clamp_header(self, card_w):
+        """Header strip width = the card's width exactly (or the buttons'
+        minimum if they genuinely need more) — edges line up with the art."""
+        try:
+            need = sum(ch.winfo_reqwidth()
+                       for ch in self.header.winfo_children()
+                       if ch.winfo_manager())
+            self.header.configure(width=max(card_w, need))
+        except Exception:
+            pass
+
     def set_state(self, s):
         self.state = s
+        # Grandma semantics: GREEN = it hears you, amber = working. Red is
+        # reserved for genuinely-broken, which is none of these states.
+        colors = {"off": "#9a86b8", "on": "#4ade80", "think": "#c9a227"}
+        bgs = {"on": "#0d3a1a"}
+        try:
+            self.mic_btn.config(fg=colors.get(s, "#9a86b8"),
+                                bg=bgs.get(s, "#221833"))
+        except Exception:
+            pass
+        self._refresh()
+
+    def toggle_warm(self):
+        """Flip keep-warm; the 🔥 header button IS the indicator (bright when
+        holding the link) and the card's flame glows/sleeps to match."""
+        warm = getattr(self.rec, "warm", False)
+        self.rec.set_warm(not warm)
+        now_on = getattr(self.rec, "warm", False)
+        try:
+            self.warm_btn.config(fg=("#ffb347" if now_on else "#5a4a6e"),
+                                 bg=("#3a2410" if now_on else "#221833"))
+        except Exception:
+            pass
         self._refresh()
 
     # -------- interaction
@@ -889,8 +1055,10 @@ class App:
         w, h = self.card.winfo_width(), self.card.winfo_height()
         def inside(cx, cy, r):
             return ((x - w * cx) ** 2 + (y - h * cy) ** 2) ** 0.5 <= w * r
-        if inside(*V2_SB):
+        if inside(*V2_MIC):
             return "state"
+        if inside(*V2_READ):
+            return "read"
         for name, box in self._v2_aux().items():
             if inside(*box):
                 return name
@@ -902,9 +1070,10 @@ class App:
                 hit = self._v2_hit(e.x, e.y)
                 if hit == "state":
                     self.toggle()
+                elif hit == "read":
+                    self.read_clipboard()
                 elif hit == "warm":
-                    self.rec.set_warm(not getattr(self.rec, "warm", False))
-                    self._refresh()   # flame glows / sleeps
+                    self.toggle_warm()
                 elif hit == "refresh":
                     threading.Thread(
                         target=lambda: subprocess.run(
@@ -986,13 +1155,26 @@ class App:
             text = self.root.clipboard_get()
         except Exception:
             print("clipboard is empty — copy something first."); return
-        if self.tts_engine == "windows" and not self.tts_voice:
-            speak_windows(text)   # the original zero-frills path
-            return
         import voices
-        threading.Thread(target=voices.speak,
-                         args=(text, self.tts_engine, self.tts_voice),
-                         daemon=True).start()
+        def run():
+            try:
+                voices.speak(text, self.tts_engine, self.tts_voice)
+            finally:   # 🔊 + card button glow while reading, rest when done
+                def done():
+                    self.read_active = False
+                    try:
+                        self.read_hdr.config(fg="#9a86b8")
+                    except Exception:
+                        pass
+                    self._refresh()
+                self.root.after(0, done)
+        self.read_active = True
+        try:
+            self.read_hdr.config(fg="#4fc3f7")
+        except Exception:
+            pass
+        self._refresh()
+        threading.Thread(target=run, daemon=True).start()
 
     # -------- voice settings (BYO-key tiers, 2026-08-15)
     def _voice_settings(self):
@@ -1125,20 +1307,26 @@ class App:
                 label=name + (" ✓" if abs(self.scale - s) < 0.01 else ""),
                 command=lambda s=s: self._set("scale", s))
         m.add_separator()
-        if have_art():
-            for sk, name in (("illustrated", "Look: illustrated"),
-                             ("simple", "Look: simple high-contrast")):
+        themes = v2_themes()
+        if themes or have_art():
+            for t in themes:
+                on = self.skin == "illustrated" and self.v2_theme == t
                 m.add_command(
-                    label=name + (" ✓" if self.skin == sk else ""),
-                    command=lambda sk=sk: self._set("skin", sk))
+                    label=f"Look: 🎨 {t}" + (" ✓" if on else ""),
+                    command=lambda t=t: self._set_look("illustrated", t))
+            m.add_command(
+                label="Look: 🔲 simple high-contrast (self-drawn)"
+                      + (" ✓" if self.skin == "simple" else ""),
+                command=lambda: self._set_look("simple", self.v2_theme))
             m.add_separator()
         warm = self.rec.warm
         m.add_command(
             label=("Keep mic warm: ON (click to release)" if warm else
                    "Keep mic warm: off (click to hold open)"),
-            command=lambda: (self.rec.set_warm(not warm),
-                             self._refresh()))   # v2 flame tracks the state
+            command=self.toggle_warm)
         m.add_separator()
+        m.add_command(label="⌨ Keyboard shortcuts (a reminder card)",
+                      command=self._show_shortcuts)
         m.add_command(label="🗣 Read-aloud voice (pick who reads to you)",
                       command=self._voice_settings)
         m.add_command(label="📖 My dictionary (names it should spell right)",
@@ -1155,7 +1343,7 @@ class App:
                     label="🧠 Get better accuracy (one-time ~180MB download)",
                     command=self._offer_brain)
         m.add_separator()
-        m.add_command(label="Quit Chaos Capture", command=self.root.destroy)
+        m.add_command(label="Quit Chaos Capture", command=self.shutdown)
         m.tk_popup(e.x_root, e.y_root)
 
     def _edit_dictionary(self):
@@ -1248,8 +1436,69 @@ class App:
                 "works with the built-in engine meanwhile.")
         self.root.after(6000, w.destroy)
 
+    def _show_shortcuts(self):
+        """A plain reminder card. Everyone forgets hotkeys — Ren forgot them
+        the same afternoon they were designed (8/15), so Grandma has no
+        chance. Lives one click away, closes with one click."""
+        d = tk.Toplevel(self.root)
+        d.title("Keyboard shortcuts")
+        d.attributes("-topmost", True)
+        d.resizable(False, False)
+        rows = [
+            ("Ctrl + Alt + D", "start talking / finish talking"),
+            ("Ctrl + Alt + R", "read the copied text out loud"),
+            ("Ctrl + Alt + M", "open the menu"),
+            ("Ctrl + Alt + H", "hide the widget / bring it back"),
+            ("Ctrl + Alt + arrows", "nudge the widget around"),
+            ("Ctrl + Alt + 1 2 3 4", "snap to a corner of the screen"),
+            ("Esc", "cancel talking (nothing is typed)"),
+            ("Ctrl + Alt + Q", "quit"),
+        ]
+        grid = tk.Frame(d)
+        for i, (keys, what) in enumerate(rows):
+            tk.Label(grid, text=keys, font=("Consolas", 12, "bold"),
+                     anchor="e").grid(row=i, column=0, sticky="e",
+                                      padx=(14, 10), pady=3)
+            tk.Label(grid, text=what, font=("Segoe UI", 11),
+                     anchor="w").grid(row=i, column=1, sticky="w",
+                                      padx=(0, 14), pady=3)
+        grid.pack(pady=(12, 4))
+        tk.Label(d, text="Everything here also works by clicking — "
+                         "the buttons do the same things.",
+                 font=("Segoe UI", 9), fg="#666666").pack(pady=(2, 6))
+        tk.Button(d, text="Got it", font=("Segoe UI", 11, "bold"),
+                  command=d.destroy).pack(pady=(0, 12))
+
+    def shutdown(self):
+        """Close GENTLY: release the mic stream BEFORE the window dies.
+        Killing the process while keep-warm holds an open Bluetooth stream
+        can wedge the Windows BT audio driver and drop the user's hearing
+        aids — discovered the hard way on the aids this app was built for
+        (8/15). Grandma's aids get the same protection."""
+        try:
+            self.rec.recording = False
+            self.rec.set_warm(False)
+            if self.rec.stream:
+                try:
+                    self.rec.stream.stop(); self.rec.stream.close()
+                except Exception:
+                    pass
+                self.rec.stream = None
+        except Exception:
+            pass
+        self.root.destroy()
+
     def _set(self, attr, val):
         setattr(self, attr, val)
+        if attr == "skin":
+            self._apply_features()   # v2 hides the read bar; simple shows it
+        self._refresh()
+        self.root.update_idletasks()
+        self._save_settings()
+
+    def _set_look(self, skin, theme):
+        self.skin, self.v2_theme = skin, theme
+        self._apply_features()
         self._refresh()
         self.root.update_idletasks()
         self._save_settings()
