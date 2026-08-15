@@ -932,7 +932,18 @@ class App:
 
             def put(name, cx, cy, r, dim=False):
                 d = int(2 * r * w)
-                im = Image.open(os.path.join(tdir, name)).convert("RGBA")
+                p = os.path.join(tdir, name)
+                if not os.path.exists(p):
+                    # incomplete theme: borrow the piece from another theme
+                    # rather than crash — art lands incrementally
+                    for t in v2_themes():
+                        alt = os.path.join(v2_dir(t), name)
+                        if os.path.exists(alt):
+                            p = alt
+                            break
+                    else:
+                        return
+                im = Image.open(p).convert("RGBA")
                 im.thumbnail((d, d), Image.LANCZOS)
                 if dim:   # sleeping state: present but clearly not active
                     a = im.getchannel("A").point(lambda v: int(v * 0.68))
