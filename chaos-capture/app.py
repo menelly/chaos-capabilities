@@ -308,6 +308,56 @@ def have_bt_refresh_task():
         return False
 
 
+
+# ---- Bluetooth refresh helper (the stale-hearing-aid medicine).
+# Bouncing the BT radio needs admin, so a one-time elevated setup registers
+# a SYSTEM scheduled task; after that the 🔄 button triggers it promptlessly.
+# Born on Ren's Phonaks; shipped for every hearing-aid wearer's "connected
+# but silently delivering nothing" mornings.
+_BT_BOUNCE_PS = r"""
+$log = Join-Path (Split-Path $PSCommandPath) "bt_refresh.log"
+function Log($m) { Add-Content $log ("[{0:yyyy-MM-dd HH:mm:ss}] {1}" -f (Get-Date), $m) }
+$radio = Get-PnpDevice -Class Bluetooth | Where-Object { $_.InstanceId -like "USB*" } | Select-Object -First 1
+if (-not $radio) { $radio = Get-PnpDevice -Class Bluetooth | Select-Object -First 1 }
+if (-not $radio) { Log "NO radio found"; exit 1 }
+Log ("bouncing radio: {0}" -f $radio.FriendlyName)
+Disable-PnpDevice -InstanceId $radio.InstanceId -Confirm:$false
+Start-Sleep -Seconds 3
+Enable-PnpDevice -InstanceId $radio.InstanceId -Confirm:$false
+Log "radio re-enabled - paired devices re-handshake in ~10-20s"
+"""
+
+_BT_INSTALL_PS = r"""
+# Elevated one-shot: register the bounce as a SYSTEM task (session 0 = no
+# console flash), so future runs need no prompt.
+$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument ("-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"" + $args[0] + "`"")
+$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
+Register-ScheduledTask -TaskName "BluetoothRefresh" -Action $action -Principal $principal -Settings $settings -Force | Out-Null
+Write-Output "installed"
+"""
+
+
+def setup_bt_refresh():
+    """Write the bounce script beside the app, then ask Windows (ONE UAC
+    yes) to register it as the promptless helper task. Returns success."""
+    bounce_path = os.path.join(HERE, "bt_refresh.ps1")
+    with open(bounce_path, "w", encoding="utf-8-sig") as f:
+        f.write(_BT_BOUNCE_PS)
+    inst_path = os.path.join(HERE, "bt_install.ps1")
+    with open(inst_path, "w", encoding="utf-8-sig") as f:
+        f.write(_BT_INSTALL_PS)
+    # -Verb RunAs = the UAC prompt; the inner script registers the task
+    r = subprocess.run(
+        ["powershell", "-NoProfile", "-Command",
+         f"Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden "
+         f"-ArgumentList '-NoProfile','-ExecutionPolicy','Bypass',"
+         f"'-File','{inst_path}','{bounce_path}'"],
+        capture_output=True, text=True, timeout=120,
+        creationflags=subprocess.CREATE_NO_WINDOW)
+    return have_bt_refresh_task()
+
+
 def have_art():
     return all(os.path.exists(os.path.join(ART_DIR, f))
                for f in ART_FILES.values())
@@ -1539,9 +1589,9 @@ class App:
                    "Keep mic warm: off (click to hold open)"),
             command=self.toggle_warm)
         if not getattr(self, "_has_refresh", False):
-            m.add_command(label="🔄 Bluetooth refresh: needs a helper this "
-                                "PC doesn't have (that's why no button)",
-                          state="disabled")
+            m.add_command(label="🔄 Set up Bluetooth refresh (fixes stale "
+                                "hearing-aid links — one admin OK)",
+                          command=self._setup_refresh)
         m.add_separator()
         m.add_command(label="⌨ Keyboard shortcuts (a reminder card)",
                       command=self._show_shortcuts)
@@ -1715,6 +1765,30 @@ class App:
         except Exception:
             pass
         self.root.destroy()
+
+    def _setup_refresh(self):
+        """One UAC yes → the promptless bounce helper exists → the 🔄 button
+        appears everywhere it belongs. (Ren, 8/15: 'why did we not just
+        build the same bouncing option for everybody?' No reason. Built.)"""
+        def worker():
+            ok = setup_bt_refresh()
+            def done():
+                if ok:
+                    self._has_refresh = True
+                    self.imgs = {k: v for k, v in self.imgs.items()
+                                 if not (isinstance(k, tuple) and k[0] == "v2")}
+                    try:
+                        self.bt_btn.pack(side="left", after=self.warm_btn)
+                    except Exception:
+                        pass
+                    self._refresh()
+                    print("🔄 Bluetooth refresh helper installed — the button "
+                          "now lives on the card and header.")
+                else:
+                    print("(helper not installed — the admin prompt may have "
+                          "been declined. The menu row will offer it again.)")
+            self.root.after(0, done)
+        threading.Thread(target=worker, daemon=True).start()
 
     def _theme_cfg(self):
         try:
