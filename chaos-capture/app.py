@@ -1496,6 +1496,8 @@ class App:
         hdr = getattr(self, "_hdr", {"bg": "#221833", "fg": "#9a86b8"})
         m = tk.Menu(self.root, tearoff=0, bg=hdr["bg"], fg=hdr["fg"],
                     activebackground=hdr["fg"], activeforeground=hdr["bg"])
+        m.add_command(label="✖ close this menu", command=lambda: None)
+        m.add_separator()
         for t in ("auto", "dark", "light"):
             m.add_command(
                 label=f"Theme: {t}" + (" ✓" if self.theme_pref == t else ""),
@@ -1536,6 +1538,10 @@ class App:
             label=("Keep mic warm: ON (click to release)" if warm else
                    "Keep mic warm: off (click to hold open)"),
             command=self.toggle_warm)
+        if not getattr(self, "_has_refresh", False):
+            m.add_command(label="🔄 Bluetooth refresh: needs a helper this "
+                                "PC doesn't have (that's why no button)",
+                          state="disabled")
         m.add_separator()
         m.add_command(label="⌨ Keyboard shortcuts (a reminder card)",
                       command=self._show_shortcuts)
