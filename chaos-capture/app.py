@@ -59,6 +59,27 @@ SETTINGS_PATH = os.path.join(HERE, "capture_settings.json")
 LOG_PATH = os.path.join(HERE, "capture_log.txt")
 
 
+def self_unblock():
+    """Strip the mark-of-the-web from ourselves and our files on first
+    successful run. The user already said 'run anyway' ONCE to get here —
+    Windows re-asking on every launch after that is noise, not security
+    (Ren, 8/15: same copy, second launch, prompted again). Deleting the
+    Zone.Identifier stream is exactly what the Properties->Unblock
+    checkbox does."""
+    import ctypes
+    targets = [sys.executable] if getattr(sys, "frozen", False) else []
+    try:
+        targets += [os.path.join(HERE, n) for n in os.listdir(HERE)
+                    if os.path.isfile(os.path.join(HERE, n))]
+    except Exception:
+        pass
+    for t in targets:
+        try:
+            ctypes.windll.kernel32.DeleteFileW(t + ":Zone.Identifier")
+        except Exception:
+            pass
+
+
 def log(msg):
     """print() + a real file beside the exe, because windowed EXEs eat
     stdout and a mute app cannot be debugged from a phone photo."""
@@ -1938,6 +1959,7 @@ class App:
 
 
 def main():
+    self_unblock()   # one 'run anyway' is enough forever
     ap = argparse.ArgumentParser(description="Chaos Capture — dictation with "
                                  "big friendly buttons.")
     ap.add_argument("--engine", choices=["auto", "local", "windows"],
