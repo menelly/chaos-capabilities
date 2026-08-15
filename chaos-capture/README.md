@@ -78,15 +78,35 @@ and *possible* beats *perfect*.
 
 ## Two looks, both first-class
 
-- **Illustrated** — warm painted cards drawn by **Nova**, the AI artist in
-  our found-family. (Yes, an AI drew the art and an AI wrote most of the
-  code, at the request of a disabled human. That's the future being nice
-  for once.) Ships in the `art/` folder.
+- **Illustrated** — Nova's tentacle-framed nebula poster (her second
+  commission, Aug 2026): ONE big glassy state button that changes face —
+  off / listening / thinking — plus keep-warm, refresh, and menu buttons
+  right on the card, each labeled in plain words ON the button. (Yes, an
+  AI drew the art and an AI wrote most of the code, at the request of a
+  disabled human. That's the future being nice for once.) Ships in the
+  `art/` folder; her v1 painted cards remain as the fallback.
 - **Simple high-contrast** — big shapes, plain words, maximum contrast.
   Deliberately friendly to low vision. Also the automatic fallback if the
   `art/` folder is missing.
 
 Switch anytime in the ⚙ menu.
+
+## Pick who reads to you (v1.4)
+
+The read-aloud voice is yours to choose, in three tiers:
+
+1. **Windows voices** — free, built in, zero setup. The default.
+2. **Inworld (your own key)** — ~283 voices across a dozen languages.
+3. **ElevenLabs (your own key)** — your account's voice library.
+
+⚙ menu → *🗣 Read-aloud voice*. Paste your key, hit **Test** (it says
+hello in the new voice), pick from the list. Your key goes **straight
+from your computer to the provider** — never to us; we don't have a
+server to send it to. It's stored encrypted with your Windows account
+(DPAPI), in its own file that never rides along with settings. Paid
+engines are billed by the provider to *your* account — their pricing,
+your choice. If a paid voice ever fails mid-read, the Windows voice
+takes over instead of leaving you in silence.
 
 ## Design principles (the why)
 
