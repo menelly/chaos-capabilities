@@ -255,6 +255,36 @@ ART_FILES = {
 BAR_FILES = {"idle": "bar_read_idle.png", "think": "bar_read_think.png",
              "speak": "bar_read_speak.png"}
 
+# ---- v2 (Aug 2026): Nova's second commission. ONE big state button with
+# swappable faces plus keep-warm / refresh / menu ON the card. Buttons were
+# rendered separately from the background so we composite them ourselves.
+# Fractions of card width/height, from the approved layout mockups.
+V2_DIR = os.path.join(ART_DIR, "v2")
+V2_ASPECT = 747 / 560
+V2_STATE_ART = {"off": "off.png", "on": "micon.png", "think": "thinking.png"}
+V2_SB = (0.50, 0.482, 0.241)              # big state button: cx, cy, r-of-width
+V2_AUX3 = {"warm": (0.245, 0.75, 0.098),  # with refresh available
+           "refresh": (0.50, 0.75, 0.098),
+           "menu": (0.755, 0.75, 0.098)}
+V2_AUX2 = {"warm": (0.34, 0.75, 0.098),   # refresh helper not installed
+           "menu": (0.66, 0.75, 0.098)}
+
+
+def have_v2():
+    return os.path.exists(os.path.join(V2_DIR, "background.png"))
+
+
+def have_bt_refresh_task():
+    """The 🔄 button only exists if the elevated helper task is installed —
+    a button that can't do anything would be a lie on the card."""
+    try:
+        r = subprocess.run(["schtasks", "/query", "/tn", "BluetoothRefresh"],
+                           capture_output=True, timeout=10,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+        return r.returncode == 0
+    except Exception:
+        return False
+
 
 def have_art():
     return all(os.path.exists(os.path.join(ART_DIR, f))
@@ -562,6 +592,17 @@ class App:
         self.imgs = {}
         self._load_settings()
 
+        # v2 card: probe once (in the background — schtasks is slow) whether
+        # the BT-refresh helper exists; the 🔄 button only draws if it does.
+        self._has_refresh = False
+        def _probe():
+            if have_bt_refresh_task():
+                self._has_refresh = True
+                self.imgs = {k: v for k, v in self.imgs.items()
+                             if not (isinstance(k, tuple) and k[0] == "v2")}
+                self.root.after(0, self._refresh)
+        threading.Thread(target=_probe, daemon=True).start()
+
         root.overrideredirect(True)
         root.wm_attributes("-topmost", True)
         root.wm_attributes("-transparentcolor", KEYCOL)
@@ -761,22 +802,59 @@ class App:
     def theme(self):
         return windows_theme() if self.theme_pref == "auto" else self.theme_pref
 
+    def _v2_aux(self):
+        return V2_AUX3 if getattr(self, "_has_refresh", False) else V2_AUX2
+
+    def _img_v2(self, w):
+        """Nova's v2 composite: nebula background + the ONE state button +
+        keep-warm / (refresh) / menu. Cached per (state, warm, width)."""
+        warm = getattr(self.rec, "warm", False)
+        key = ("v2", self.state, warm, w)
+        if key not in self.imgs:
+            h = int(w * V2_ASPECT)
+            bg = Image.open(os.path.join(V2_DIR, "background.png")).convert("RGBA")
+            c = bg.resize((w, h), Image.LANCZOS)
+
+            def put(name, cx, cy, r, dim=False):
+                d = int(2 * r * w)
+                im = Image.open(os.path.join(V2_DIR, name)).convert("RGBA")
+                im.thumbnail((d, d), Image.LANCZOS)
+                if dim:   # keep-warm off = flame sleeping
+                    a = im.getchannel("A").point(lambda v: int(v * 0.45))
+                    im.putalpha(a)
+                c.alpha_composite(im, (int(cx * w - im.width / 2),
+                                       int(cy * h - im.height / 2)))
+
+            put(V2_STATE_ART[self.state], *V2_SB)
+            aux = self._v2_aux()
+            put("keepwarm.png", *aux["warm"], dim=not warm)
+            if "refresh" in aux:
+                put("refresh.png", *aux["refresh"])
+            put("menu.png", *aux["menu"])
+            flat = Image.new("RGBA", c.size, KEYCOL)
+            flat.alpha_composite(c)
+            self.imgs[key] = ImageTk.PhotoImage(flat.convert("RGB"))
+        return self.imgs[key]
+
     def _refresh(self):
         w = max(120, int(220 * self.scale))
         art = have_art() and self.skin == "illustrated"
-        key = (self.theme(), self.state, w, art)
-        if key not in self.imgs:
-            if art:
-                p = os.path.join(ART_DIR, ART_FILES[(key[0], key[1])])
-                im = Image.open(p).convert("RGBA")
-                im = im.resize((w, int(w * im.height / im.width)),
-                               Image.LANCZOS)
-            else:
-                im = draw_card(key[0], key[1], w)
-            flat = Image.new("RGBA", im.size, KEYCOL)
-            flat.alpha_composite(im)
-            self.imgs[key] = ImageTk.PhotoImage(flat.convert("RGB"))
-        self.card.configure(image=self.imgs[key])
+        if self.skin == "illustrated" and have_v2():
+            self.card.configure(image=self._img_v2(w))
+        else:
+            key = (self.theme(), self.state, w, art)
+            if key not in self.imgs:
+                if art:
+                    p = os.path.join(ART_DIR, ART_FILES[(key[0], key[1])])
+                    im = Image.open(p).convert("RGBA")
+                    im = im.resize((w, int(w * im.height / im.width)),
+                                   Image.LANCZOS)
+                else:
+                    im = draw_card(key[0], key[1], w)
+                flat = Image.new("RGBA", im.size, KEYCOL)
+                flat.alpha_composite(im)
+                self.imgs[key] = ImageTk.PhotoImage(flat.convert("RGB"))
+            self.card.configure(image=self.imgs[key])
         bkey = ("bar", self.theme(), w, art)
         if bkey not in self.imgs:
             if art:
@@ -807,9 +885,37 @@ class App:
                 self.root.geometry(f"+{self.root.winfo_x() + dx}"
                                    f"+{self.root.winfo_y() + dy}")
 
+    def _v2_hit(self, x, y):
+        w, h = self.card.winfo_width(), self.card.winfo_height()
+        def inside(cx, cy, r):
+            return ((x - w * cx) ** 2 + (y - h * cy) ** 2) ** 0.5 <= w * r
+        if inside(*V2_SB):
+            return "state"
+        for name, box in self._v2_aux().items():
+            if inside(*box):
+                return name
+        return None
+
     def _release(self, e):
         if not self._moved:
-            self.toggle()
+            if self.skin == "illustrated" and have_v2():
+                hit = self._v2_hit(e.x, e.y)
+                if hit == "state":
+                    self.toggle()
+                elif hit == "warm":
+                    self.rec.set_warm(not getattr(self.rec, "warm", False))
+                    self._refresh()   # flame glows / sleeps
+                elif hit == "refresh":
+                    threading.Thread(
+                        target=lambda: subprocess.run(
+                            ["schtasks", "/run", "/tn", "BluetoothRefresh"],
+                            capture_output=True,
+                            creationflags=subprocess.CREATE_NO_WINDOW),
+                        daemon=True).start()
+                elif hit == "menu":
+                    self._menu(e)
+            else:
+                self.toggle()
         else:
             self._save_pos()
         self._drag_start = None
@@ -1030,7 +1136,8 @@ class App:
         m.add_command(
             label=("Keep mic warm: ON (click to release)" if warm else
                    "Keep mic warm: off (click to hold open)"),
-            command=lambda: self.rec.set_warm(not warm))
+            command=lambda: (self.rec.set_warm(not warm),
+                             self._refresh()))   # v2 flame tracks the state
         m.add_separator()
         m.add_command(label="🗣 Read-aloud voice (pick who reads to you)",
                       command=self._voice_settings)
