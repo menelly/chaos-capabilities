@@ -1134,7 +1134,7 @@ class App:
         # reserved for genuinely-broken, which is none of these states.
         hdr = getattr(self, "_hdr", {"bg": "#221833", "fg": "#9a86b8"})
         colors = {"off": hdr["fg"], "on": "#4ade80", "think": "#c9a227"}
-        bgs = {"on": "#0d3a1a"}
+        bgs = {"on": hdr.get("on_bg", "#0d3a1a")}
         try:
             self.mic_btn.config(fg=colors.get(s, hdr["fg"]),
                                 bg=bgs.get(s, hdr["bg"]))
@@ -1151,7 +1151,8 @@ class App:
         hdr = getattr(self, "_hdr", {"bg": "#221833", "fg": "#9a86b8"})
         try:
             self.warm_btn.config(fg=("#ffb347" if now_on else hdr["fg"]),
-                                 bg=("#3a2410" if now_on else hdr["bg"]))
+                                 bg=(hdr.get("warm_bg", "#3a2410") if now_on
+                                     else hdr["bg"]))
         except Exception:
             pass
         self._refresh()
@@ -1721,8 +1722,11 @@ class App:
         """The chrome dresses for the theme: header + popup colors come from
         theme.json, defaulting to the octopus purple."""
         cfg = self._theme_cfg()
+        sb = cfg.get("state_bgs", {})
         self._hdr = {"bg": cfg.get("header_bg", "#221833"),
-                     "fg": cfg.get("header_fg", "#9a86b8")}
+                     "fg": cfg.get("header_fg", "#9a86b8"),
+                     "on_bg": sb.get("on", "#0d3a1a"),
+                     "warm_bg": sb.get("warm", "#3a2410")}
         try:
             self.header.configure(bg=self._hdr["bg"])
             for wdg in (self.grip, self.mic_btn, self.read_hdr, self.bt_btn,
@@ -1730,7 +1734,7 @@ class App:
                 wdg.configure(bg=self._hdr["bg"], fg=self._hdr["fg"])
             warm = getattr(self.rec, "warm", False)
             self.warm_btn.configure(
-                bg=("#3a2410" if warm else self._hdr["bg"]),
+                bg=(self._hdr["warm_bg"] if warm else self._hdr["bg"]),
                 fg=("#ffb347" if warm else self._hdr["fg"]))
             self.set_state(self.state)
         except Exception:

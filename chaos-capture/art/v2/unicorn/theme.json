@@ -7,5 +7,10 @@
   ],
   "ring_width_frac": 0.014,
   "header_bg": "#fdf3f6",
-  "header_fg": "#d76a8a"
+  "header_fg": "#d76a8a",
+  "state_bgs": {
+    "on": "#d9f2e2",
+    "warm": "#fdeacc",
+    "lost": "#fadadd"
+  }
 }
