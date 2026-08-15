@@ -109,28 +109,43 @@ def transcribe_windows(wav_path, hotwords):
 # downloaded and how big it is, and chooses. Phone-sized model, runs on
 # modest CPUs. Once present, it's used automatically. Delete the brain/
 # folder to go back to the built-in engine.
-BRAIN_DIR = os.path.join(HERE, "brain")
+# Search order: beside the exe (old installs), then the stable per-user
+# home that survives version upgrades (Ren, 8/15: "the wizard needs to
+# recognize that I've already downloaded it" — 180MB is user data, not
+# app data; it must outlive any one version's folder).
+BRAIN_HOME = os.path.join(os.environ.get("LOCALAPPDATA", HERE),
+                          "ChaosCapture", "brain")
+
+
+def brain_dir():
+    for d in (os.path.join(HERE, "brain"), BRAIN_HOME):
+        if any(os.path.exists(os.path.join(d, n))
+               for n in ("whisper-cli.exe", "main.exe")):
+            return d
+    return BRAIN_HOME   # downloads land in the version-proof home
+BRAIN_DIR = None  # legacy name; use brain_dir()
 BRAIN_ZIP_URL = ("https://github.com/ggerganov/whisper.cpp/releases/latest/"
                  "download/whisper-bin-x64.zip")
 BRAIN_MODEL_URL = ("https://huggingface.co/ggerganov/whisper.cpp/resolve/"
                    "main/ggml-base.en.bin")
-BRAIN_MODEL = os.path.join(BRAIN_DIR, "ggml-base.en.bin")
+def brain_model():
+    return os.path.join(brain_dir(), "ggml-base.en.bin")
 
 
 def brain_exe():
     for name in ("whisper-cli.exe", "main.exe"):
-        p = os.path.join(BRAIN_DIR, name)
+        p = os.path.join(brain_dir(), name)
         if os.path.exists(p):
             return p
     return None
 
 
 def have_brain():
-    return brain_exe() is not None and os.path.exists(BRAIN_MODEL)
+    return brain_exe() is not None and os.path.exists(brain_model())
 
 
 def transcribe_brain(wav_path, hotwords):
-    cmd = [brain_exe(), "-m", BRAIN_MODEL, "-f", wav_path,
+    cmd = [brain_exe(), "-m", brain_model(), "-f", wav_path,
            "-nt", "-np", "-l", "en"]
     if hotwords:
         cmd += ["--prompt", hotwords]
@@ -603,12 +618,16 @@ class Wizard:
     def s_engine(self):
         self._title("Which speech engine for understanding you?")
         self._body("Both are free and both stay on your computer.")
+        brain_label = ("🧠 The better brain — ALREADY ON THIS COMPUTER ✓ "
+                       "(no download needed, just picks it)"
+                       if have_brain() else
+                       "🧠 The better brain — one-time ~180MB download, "
+                       "noticeably more accurate. Recommended if your "
+                       "internet can manage it.")
         self._radios("engine", [
             ("windows", "Built-in Windows speech — works right now, "
                         "nothing to download. Makes more mistakes."),
-            ("brain", "🧠 The better brain — one-time ~180MB download, "
-                      "noticeably more accurate. Recommended if your "
-                      "internet can manage it.")])
+            ("brain", brain_label)])
         ram = system_ram_gb()
         cores = os.cpu_count() or 2
         if ram:
@@ -1684,14 +1703,14 @@ class App:
             self.root.after(0, lambda: lbl.config(text=msg))
 
         try:
-            os.makedirs(BRAIN_DIR, exist_ok=True)
+            os.makedirs(brain_dir(), exist_ok=True)
             say("Downloading engine (step 1 of 2)...")
             data = urllib.request.urlopen(BRAIN_ZIP_URL, timeout=60).read()
             zf = zipfile.ZipFile(io.BytesIO(data))
             for name in zf.namelist():
                 base = os.path.basename(name)
                 if base and (base.endswith(".exe") or base.endswith(".dll")):
-                    with open(os.path.join(BRAIN_DIR, base), "wb") as f:
+                    with open(os.path.join(brain_dir(), base), "wb") as f:
                         f.write(zf.read(name))
             say("Downloading model (step 2 of 2)...\nThis is the big one "
                 "(~148MB) — a few minutes on slow internet.")
@@ -1700,7 +1719,7 @@ class App:
                 if total > 0:
                     pct = min(100, blocks * bsize * 100 // total)
                     say(f"Downloading model (step 2 of 2)... {pct}%")
-            urllib.request.urlretrieve(BRAIN_MODEL_URL, BRAIN_MODEL, hook)
+            urllib.request.urlretrieve(BRAIN_MODEL_URL, brain_model(), hook)
 
             if have_brain():
                 say("Done! The better brain is installed and will be\n"
