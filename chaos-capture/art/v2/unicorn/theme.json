@@ -1,0 +1,11 @@
+{
+  "button_ring": [
+    238,
+    130,
+    158,
+    240
+  ],
+  "ring_width_frac": 0.014,
+  "header_bg": "#fdf3f6",
+  "header_fg": "#d76a8a"
+}

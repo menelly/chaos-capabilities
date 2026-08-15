@@ -312,6 +312,53 @@ def have_art():
     return all(os.path.exists(os.path.join(ART_DIR, f))
                for f in ART_FILES.values())
 
+
+# ---- desktop icon / start-with-Windows (Ren, 8/15: "Grandma Jane needs to
+# put it on her desktop, where she will never find it again"). Plain .lnk
+# shortcuts, no admin, no registry. Only meaningful for the frozen EXE.
+_SHORTCUT_PS = r"""
+$W = New-Object -ComObject WScript.Shell
+$dest = Join-Path ([Environment]::GetFolderPath($args[0])) "Chaos Capture.lnk"
+if ($args[2] -eq "remove") {
+  if (Test-Path $dest) { Remove-Item $dest }
+  Write-Output "removed"
+} else {
+  $s = $W.CreateShortcut($dest)
+  $s.TargetPath = $args[1]
+  $s.WorkingDirectory = (Split-Path $args[1])
+  $s.Description = "Chaos Capture - talk instead of type"
+  $s.Save()
+  Write-Output "made $dest"
+}
+"""
+
+
+def shortcut_path(where):
+    import ctypes.wintypes
+    name = {"desktop": 0x10, "startup": 0x07}[where]  # CSIDL codes
+    buf = ctypes.create_unicode_buffer(ctypes.wintypes.MAX_PATH)
+    ctypes.windll.shell32.SHGetFolderPathW(None, name, None, 0, buf)
+    return os.path.join(buf.value, "Chaos Capture.lnk")
+
+
+def has_shortcut(where):
+    try:
+        return os.path.exists(shortcut_path(where))
+    except Exception:
+        return False
+
+
+def set_shortcut(where, want):
+    """Create or remove the desktop/startup shortcut. Returns success."""
+    if not getattr(sys, "frozen", False):
+        print("(shortcuts are for the installed EXE — running from source)")
+        return False
+    import voices
+    folder = "Desktop" if where == "desktop" else "Startup"
+    r = voices.run_ps(_SHORTCUT_PS, folder, sys.executable,
+                      "make" if want else "remove", timeout=30)
+    return r.returncode == 0
+
 PALETTES = {
     "dark":  {"card": "#221833", "ring": "#9a86b8", "off": "#3a2150",
               "on": "#d63e6c", "think": "#c9a227", "ink": "#f3e9ff"},
@@ -578,6 +625,16 @@ class Wizard:
         if hasattr(self, "words_box"):
             pass
         self._title("That's everything! 🎉")
+        if getattr(sys, "frozen", False):
+            self.v_desktop = tk.BooleanVar(value=True)
+            self.v_startup = tk.BooleanVar(value=True)
+            tk.Checkbutton(self.frame, text="🖥️ Put an icon on my desktop",
+                           variable=self.v_desktop, font=self.F_BODY,
+                           bg="white", anchor="w").pack(anchor="w")
+            tk.Checkbutton(self.frame,
+                           text="🚀 Start Chaos Capture when my computer starts",
+                           variable=self.v_startup, font=self.F_BODY,
+                           bg="white", anchor="w").pack(anchor="w")
         self._body("The little widget lives in the corner of your screen. "
                    "The cheat sheet:\n\n"
                    "🎙️  Ctrl+Alt+D — or click the big button — to talk\n"
@@ -617,6 +674,11 @@ class Wizard:
         self.win.destroy()
         if a["engine"] == "brain" and not have_brain():
             app._offer_brain()
+        if getattr(sys, "frozen", False) and hasattr(self, "v_desktop"):
+            if self.v_desktop.get():
+                set_shortcut("desktop", True)
+            if self.v_startup.get():
+                set_shortcut("startup", True)
         if a["tts_engine"] in ("inworld", "elevenlabs"):
             import voices
             if not voices.load_key(a["tts_engine"]):
@@ -633,7 +695,9 @@ class App:
         self.scale = 1.0
         self.theme_pref = "auto"
         self.skin = "illustrated"   # "illustrated" (Nova's art) | "simple"
-        self.v2_theme = "nebula"    # which art/v2/<theme>/ folder
+        self.v2_theme = "octopus"   # which art/v2/<theme>/ folder
+        self.bg_dim = None          # user's background-dim override
+                                    # (None = each theme's own default)
         self.saved_pos = None       # remembered screen position
         self.features = "both"      # "both" | "stt" | "tts"
         self.onboarded = False      # first-run wizard shown yet?
@@ -779,6 +843,7 @@ class App:
                 print(f"(no global hotkeys: {e} — clicking still works)")
 
         self._apply_features()
+        self._apply_header_theme()
         self._refresh()
         root.update_idletasks()
         if self.saved_pos:
@@ -886,6 +951,9 @@ class App:
             self.v2_theme = s.get("v2_theme", self.v2_theme)
             if self.v2_theme not in v2_themes() and v2_themes():
                 self.v2_theme = v2_themes()[0]
+            self.bg_dim = s.get("bg_dim", None)
+            if self.bg_dim is not None:
+                self.bg_dim = float(self.bg_dim)
             p = s.get("pos")
             if (isinstance(p, list) and len(p) == 2
                     and all(isinstance(v, int) for v in p)):
@@ -903,7 +971,8 @@ class App:
                            "onboarded": self.onboarded,
                            "tts_engine": getattr(self, "tts_engine", "windows"),
                            "tts_voice": getattr(self, "tts_voice", None),
-                           "v2_theme": getattr(self, "v2_theme", "nebula"),
+                           "v2_theme": getattr(self, "v2_theme", "octopus"),
+                           "bg_dim": getattr(self, "bg_dim", None),
                            "pos": (list(self.saved_pos)
                                    if self.saved_pos else None)}, f)
         except Exception:
@@ -923,12 +992,40 @@ class App:
         warm = getattr(self.rec, "warm", False)
         reading = getattr(self, "read_active", False)
         key = ("v2", self.v2_theme, self.state, reading, warm,
-               getattr(self, "bt_ok", False), w)
+               getattr(self, "bt_ok", False), getattr(self, "bg_dim", None), w)
         if key not in self.imgs:
             h = int(w * V2_ASPECT)
             tdir = v2_dir(self.v2_theme)
+            # optional theme.json: bg_fade dims the BACKGROUND only (the art
+            # is lovely AND it's visual noise for some eyes — buttons stay
+            # full strength); button_ring draws a locator ring per control.
+            # The user's own dim choice (menu slider) overrides the theme's.
+            cfg = {}
+            try:
+                with open(os.path.join(tdir, "theme.json"),
+                          encoding="utf-8") as f:
+                    cfg = json.load(f)
+            except Exception:
+                pass
             bg = Image.open(os.path.join(tdir, "background.png")).convert("RGBA")
             c = bg.resize((w, h), Image.LANCZOS)
+            fade = (self.bg_dim if getattr(self, "bg_dim", None) is not None
+                    else float(cfg.get("bg_fade", 0)))
+            if fade > 0:
+                col = tuple(cfg.get("bg_fade_color", [0, 0, 0]))
+                veil = Image.new("RGBA", c.size, col + (int(255 * fade),))
+                c.alpha_composite(veil)
+            ring = cfg.get("button_ring")
+            ring_w = max(2, int(float(cfg.get("ring_width_frac", 0.012)) * w))
+
+            def draw_ring(cx, cy, r):
+                if not ring:
+                    return
+                rd = ImageDraw.Draw(c)
+                rr = r * w * 1.04
+                rd.ellipse([cx * w - rr, cy * h - rr,
+                            cx * w + rr, cy * h + rr],
+                           outline=tuple(ring), width=ring_w)
 
             def put(name, cx, cy, r, dim=False):
                 d = int(2 * r * w)
@@ -952,8 +1049,12 @@ class App:
                                        int(cy * h - im.height / 2)))
 
             put(V2_STATE_ART[self.state], *V2_MIC)
+            draw_ring(*V2_MIC)
             put("read.png", *V2_READ, dim=not reading)
+            draw_ring(*V2_READ)
             aux = self._v2_aux()
+            for pos in aux.values():
+                draw_ring(*pos)
             put("keepwarm.png", *aux["warm"], dim=not warm)
             if "refresh" in aux:
                 if getattr(self, "bt_ok", False):
@@ -1028,11 +1129,12 @@ class App:
         self.state = s
         # Grandma semantics: GREEN = it hears you, amber = working. Red is
         # reserved for genuinely-broken, which is none of these states.
-        colors = {"off": "#9a86b8", "on": "#4ade80", "think": "#c9a227"}
+        hdr = getattr(self, "_hdr", {"bg": "#221833", "fg": "#9a86b8"})
+        colors = {"off": hdr["fg"], "on": "#4ade80", "think": "#c9a227"}
         bgs = {"on": "#0d3a1a"}
         try:
-            self.mic_btn.config(fg=colors.get(s, "#9a86b8"),
-                                bg=bgs.get(s, "#221833"))
+            self.mic_btn.config(fg=colors.get(s, hdr["fg"]),
+                                bg=bgs.get(s, hdr["bg"]))
         except Exception:
             pass
         self._refresh()
@@ -1043,9 +1145,10 @@ class App:
         warm = getattr(self.rec, "warm", False)
         self.rec.set_warm(not warm)
         now_on = getattr(self.rec, "warm", False)
+        hdr = getattr(self, "_hdr", {"bg": "#221833", "fg": "#9a86b8"})
         try:
-            self.warm_btn.config(fg=("#ffb347" if now_on else "#5a4a6e"),
-                                 bg=("#3a2410" if now_on else "#221833"))
+            self.warm_btn.config(fg=("#ffb347" if now_on else hdr["fg"]),
+                                 bg=("#3a2410" if now_on else hdr["bg"]))
         except Exception:
             pass
         self._refresh()
@@ -1174,7 +1277,8 @@ class App:
                 def done():
                     self.read_active = False
                     try:
-                        self.read_hdr.config(fg="#9a86b8")
+                        self.read_hdr.config(
+                            fg=getattr(self, "_hdr", {}).get("fg", "#9a86b8"))
                     except Exception:
                         pass
                     self._refresh()
@@ -1306,7 +1410,9 @@ class App:
         self._menu(_E)
 
     def _menu(self, e):
-        m = tk.Menu(self.root, tearoff=0)
+        hdr = getattr(self, "_hdr", {"bg": "#221833", "fg": "#9a86b8"})
+        m = tk.Menu(self.root, tearoff=0, bg=hdr["bg"], fg=hdr["fg"],
+                    activebackground=hdr["fg"], activeforeground=hdr["bg"])
         for t in ("auto", "dark", "light"):
             m.add_command(
                 label=f"Theme: {t}" + (" ✓" if self.theme_pref == t else ""),
@@ -1329,6 +1435,18 @@ class App:
                 label="Look: 🔲 simple high-contrast (self-drawn)"
                       + (" ✓" if self.skin == "simple" else ""),
                 command=lambda: self._set_look("simple", self.v2_theme))
+            # background-dim slider: love the art AND see past it — every
+            # pair of eyes gets its own setting (Ren, 8/15)
+            dm = tk.Menu(m, tearoff=0)
+            for val, label in ((None, "theme's own default"),
+                               (0.0, "full art"),
+                               (0.3, "calmer (30% dimmed)"),
+                               (0.55, "calm (55% dimmed)"),
+                               (0.8, "calmest (80% dimmed)")):
+                dm.add_command(
+                    label=label + (" ✓" if self.bg_dim == val else ""),
+                    command=lambda v=val: self._set("bg_dim", v))
+            m.add_cascade(label="🌗 Background dimming", menu=dm)
             m.add_separator()
         warm = self.rec.warm
         m.add_command(
@@ -1344,6 +1462,16 @@ class App:
                       command=self._edit_dictionary)
         m.add_command(label="🪄 Setup helper (the welcome questions again)",
                       command=lambda: Wizard(self))
+        if getattr(sys, "frozen", False):
+            dsk, stp = has_shortcut("desktop"), has_shortcut("startup")
+            m.add_command(
+                label=("🖥️ Desktop icon: on it — click to remove" if dsk
+                       else "🖥️ Put an icon on my desktop"),
+                command=lambda: set_shortcut("desktop", not dsk))
+            m.add_command(
+                label=("🚀 Starts with Windows ✓ — click to stop" if stp
+                       else "🚀 Start when my computer starts"),
+                command=lambda: set_shortcut("startup", not stp))
         if self.rec.engine == "windows":
             m.add_separator()
             if have_brain():
@@ -1499,6 +1627,33 @@ class App:
             pass
         self.root.destroy()
 
+    def _theme_cfg(self):
+        try:
+            with open(os.path.join(v2_dir(self.v2_theme), "theme.json"),
+                      encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _apply_header_theme(self):
+        """The chrome dresses for the theme: header + popup colors come from
+        theme.json, defaulting to the octopus purple."""
+        cfg = self._theme_cfg()
+        self._hdr = {"bg": cfg.get("header_bg", "#221833"),
+                     "fg": cfg.get("header_fg", "#9a86b8")}
+        try:
+            self.header.configure(bg=self._hdr["bg"])
+            for wdg in (self.grip, self.mic_btn, self.read_hdr, self.bt_btn,
+                        self.close_btn, self.gear, self.min_btn):
+                wdg.configure(bg=self._hdr["bg"], fg=self._hdr["fg"])
+            warm = getattr(self.rec, "warm", False)
+            self.warm_btn.configure(
+                bg=("#3a2410" if warm else self._hdr["bg"]),
+                fg=("#ffb347" if warm else self._hdr["fg"]))
+            self.set_state(self.state)
+        except Exception:
+            pass
+
     def _set(self, attr, val):
         setattr(self, attr, val)
         if attr == "skin":
@@ -1510,6 +1665,7 @@ class App:
     def _set_look(self, skin, theme):
         self.skin, self.v2_theme = skin, theme
         self._apply_features()
+        self._apply_header_theme()
         self._refresh()
         self.root.update_idletasks()
         self._save_settings()

@@ -1,0 +1,17 @@
+{
+  "bg_fade": 0.55,
+  "bg_fade_color": [
+    0,
+    0,
+    0
+  ],
+  "button_ring": [
+    255,
+    212,
+    0,
+    230
+  ],
+  "ring_width_frac": 0.012,
+  "header_bg": "#000000",
+  "header_fg": "#FFD400"
+}
