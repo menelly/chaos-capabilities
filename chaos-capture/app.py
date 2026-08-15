@@ -1404,10 +1404,89 @@ class App:
 
     # -------- menu
     def _menu_kb(self):
-        class _E:
-            x_root = self.root.winfo_x() + 10
-            y_root = self.root.winfo_y() + 30
-        self._menu(_E)
+        """Ctrl+Alt+M — the KEYBOARD menu. The widget deliberately never
+        takes focus (so dictation pastes land in your document), which means
+        Tab can never reach it — and that locked keyboard-only users out of
+        the menu entirely (Ren caught it, 8/15). This is a real focusable
+        window: arrows, Enter, Escape, first-letter jump all work."""
+        items = self._menu_items()
+        d = tk.Toplevel(self.root)
+        d.title("Chaos Capture menu — arrows + Enter, Esc closes")
+        d.attributes("-topmost", True)
+        lb = tk.Listbox(d, font=("Segoe UI", 12), width=52,
+                        height=min(len(items), 18), activestyle="dotbox")
+        for label, _ in items:
+            lb.insert("end", " " + label)
+        lb.pack(padx=8, pady=8)
+        lb.selection_set(0)
+        lb.activate(0)
+        lb.focus_set()
+        def run(_e=None):
+            sel = lb.curselection()
+            if sel:
+                fn = items[sel[0]][1]
+                d.destroy()
+                if fn:
+                    fn()
+        lb.bind("<Return>", run)
+        lb.bind("<Double-1>", run)
+        d.bind("<Escape>", lambda e: d.destroy())
+        d.focus_force()
+
+    def _menu_items(self):
+        """Flat action list for the keyboard menu — every mouse-menu power,
+        one row each, current state readable in the label."""
+        items = []
+        rec = self.rec
+        items.append(("🎙 Start / stop talking (Ctrl+Alt+D)", self.toggle))
+        items.append(("🔊 Read the copied text aloud (Ctrl+Alt+R)",
+                      self.read_clipboard))
+        warm = getattr(rec, "warm", False)
+        items.append((("🔥 Keep mic warm: ON — turn off" if warm else
+                       "🔥 Keep mic warm: off — turn on"), self.toggle_warm))
+        if getattr(self, "_has_refresh", False):
+            items.append(("🔄 Refresh stale Bluetooth", lambda: threading.Thread(
+                target=lambda: subprocess.run(
+                    ["schtasks", "/run", "/tn", "BluetoothRefresh"],
+                    capture_output=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW),
+                daemon=True).start()))
+        for t in v2_themes():
+            on = self.skin == "illustrated" and self.v2_theme == t
+            items.append((f"Look: 🎨 {t}" + (" (current)" if on else ""),
+                          lambda t=t: self._set_look("illustrated", t)))
+        items.append(("Look: 🔲 simple high-contrast"
+                      + (" (current)" if self.skin == "simple" else ""),
+                      lambda: self._set_look("simple", self.v2_theme)))
+        for val, lbl in ((None, "theme default"), (0.0, "full art"),
+                         (0.3, "30% dimmed"), (0.55, "55% dimmed"),
+                         (0.8, "80% dimmed")):
+            items.append((f"🌗 Background: {lbl}"
+                          + (" (current)" if self.bg_dim == val else ""),
+                          lambda v=val: self._set("bg_dim", v)))
+        for s, name in ((1.0, "full"), (0.75, "medium"), (0.6, "small")):
+            items.append((f"Size: {name}"
+                          + (" (current)" if abs(self.scale - s) < 0.01 else ""),
+                          lambda s=s: self._set("scale", s)))
+        for t in ("auto", "dark", "light"):
+            items.append((f"Theme: {t}"
+                          + (" (current)" if self.theme_pref == t else ""),
+                          lambda t=t: self._set("theme_pref", t)))
+        items.append(("⌨ Keyboard shortcuts card", self._show_shortcuts))
+        items.append(("🗣 Read-aloud voice settings", self._voice_settings))
+        items.append(("📖 My dictionary", self._edit_dictionary))
+        items.append(("🪄 Setup helper (wizard)", lambda: Wizard(self)))
+        if getattr(sys, "frozen", False):
+            dsk, stp = has_shortcut("desktop"), has_shortcut("startup")
+            items.append((("🖥️ Remove desktop icon" if dsk else
+                           "🖥️ Put an icon on my desktop"),
+                          lambda: set_shortcut("desktop", not dsk)))
+            items.append((("🚀 Stop starting with Windows" if stp else
+                           "🚀 Start when my computer starts"),
+                          lambda: set_shortcut("startup", not stp)))
+        items.append(("─ Hide the widget (Ctrl+Alt+H)", self.minimize))
+        items.append(("Quit Chaos Capture", self.shutdown))
+        return items
 
     def _menu(self, e):
         hdr = getattr(self, "_hdr", {"bg": "#221833", "fg": "#9a86b8"})
@@ -1586,7 +1665,7 @@ class App:
         rows = [
             ("Ctrl + Alt + D", "start talking / finish talking"),
             ("Ctrl + Alt + R", "read the copied text out loud"),
-            ("Ctrl + Alt + M", "open the menu"),
+            ("Ctrl + Alt + M", "keyboard menu (arrows + Enter, Esc closes)"),
             ("Ctrl + Alt + H", "hide the widget / bring it back"),
             ("Ctrl + Alt + arrows", "nudge the widget around"),
             ("Ctrl + Alt + 1 2 3 4", "snap to a corner of the screen"),
