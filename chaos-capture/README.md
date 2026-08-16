@@ -118,6 +118,14 @@ engines are billed by the provider to *your* account — their pricing,
 your choice. If a paid voice ever fails mid-read, the Windows voice
 takes over instead of leaving you in silence.
 
+**⚠ The honest trade, stated plainly:** with Inworld or ElevenLabs, **the
+text you have read aloud is sent to their servers** — that's how cloud
+voices work; the words travel to them and the audio travels back. Your
+key is private from us either way, but your *content* is between you and
+the provider you chose. If you read private things aloud — medical
+documents, personal messages — the **built-in Windows voice keeps every
+word 100% on your computer**, always, and that's why it's the default.
+
 ## Design principles (the why)
 
 1. **Never make sound at the user by default.** Unexpected beeps cause real

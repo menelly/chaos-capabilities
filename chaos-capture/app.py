@@ -685,13 +685,17 @@ class Wizard:
                         "now, nothing to set up. (Recommended to start.)"),
             ("inworld", "🎭 Inworld — hundreds of natural voices. Needs "
                         "your own Inworld account and key (their pricing, "
-                        "billed to you)."),
+                        "billed to you). ⚠ The text you have read aloud is "
+                        "SENT to Inworld's servers to be spoken."),
             ("elevenlabs", "🎤 ElevenLabs — very natural voices. Needs your "
                            "own ElevenLabs account and key (their pricing, "
-                           "billed to you).")])
+                           "billed to you). ⚠ The text you have read aloud "
+                           "is SENT to ElevenLabs' servers to be spoken.")])
         self._body("Pick one of the key options and I'll ask for the key "
                    "when we finish. Change your mind anytime: ⚙ menu → "
-                   "🗣 Read-aloud voice.")
+                   "🗣 Read-aloud voice. (The built-in Windows voice stays "
+                   "100% on your computer — nothing you read aloud ever "
+                   "leaves it.)")
         if self.answers["features"] == "stt":
             self._body("(You picked talking-only, so this doesn't matter — "
                        "just press Next.)")
@@ -1477,7 +1481,11 @@ class App:
                 note.config(text=("Needs your own account with the provider — "
                                   "their pricing, billed to you. The key stays "
                                   "on this computer, encrypted; it is never "
-                                  "sent to us."))
+                                  "sent to us. ⚠ BUT: the text you have read "
+                                  "aloud IS sent to the provider's servers to "
+                                  "be turned into speech. If you read private "
+                                  "things aloud, the Windows voice keeps them "
+                                  "100% on this computer."))
                 note.pack(anchor="w", **pad)
                 if voices.load_key(eng):
                     status.config(text="A key is already saved ✓ (paste a new "
