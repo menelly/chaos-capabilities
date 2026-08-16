@@ -91,6 +91,16 @@ and *possible* beats *perfect*.
 
 Switch anytime in the ⚙ menu.
 
+## Read JUST the part you want — not the whole screen
+
+Full screen readers are built for total blindness and read *everything*.
+But lots of people with partial vision want exactly one thing: **read me
+this paragraph, right here, that I copied — and then stop.** Almost
+nothing does that. This does. Copying IS the pointing: select it, copy
+it, press the read button (or Ctrl+Alt+R), hear precisely that, nothing
+else. No page tours, no menu narration, no "list with fourteen items."
+The paragraph. Then silence.
+
 ## Pick who reads to you (v1.4)
 
 The read-aloud voice is yours to choose, in three tiers:
