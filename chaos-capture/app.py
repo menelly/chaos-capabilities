@@ -1591,7 +1591,7 @@ class App:
             items.append((f"Theme: {t}"
                           + (" (current)" if self.theme_pref == t else ""),
                           lambda t=t: self._set("theme_pref", t)))
-        items.append(("🔁 Restart me (fixes most weirdness)", self.restart_self))
+        items.append(("🔁 Am I acting weird? Restart me", self.restart_self))
         items.append(("⌨ Keyboard shortcuts card", self._show_shortcuts))
         items.append(("🗣 Read-aloud voice settings", self._voice_settings))
         items.append(("📖 My dictionary", self._edit_dictionary))
@@ -1659,8 +1659,8 @@ class App:
                                 "but silent' Bluetooth — one admin OK)",
                           command=self._setup_refresh)
         m.add_separator()
-        m.add_command(label="🔁 Restart me (fixes most weirdness, incl. "
-                            "hotkeys that stopped working)",
+        m.add_command(label="🔁 Am I acting weird? Click to restart me "
+                            "(fixes most things, incl. dead hotkeys)",
                       command=self.restart_self)
         m.add_command(label="⌨ Keyboard shortcuts (a reminder card)",
                       command=self._show_shortcuts)
