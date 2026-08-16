@@ -1591,6 +1591,7 @@ class App:
             items.append((f"Theme: {t}"
                           + (" (current)" if self.theme_pref == t else ""),
                           lambda t=t: self._set("theme_pref", t)))
+        items.append(("🔁 Restart me (fixes most weirdness)", self.restart_self))
         items.append(("⌨ Keyboard shortcuts card", self._show_shortcuts))
         items.append(("🗣 Read-aloud voice settings", self._voice_settings))
         items.append(("📖 My dictionary", self._edit_dictionary))
@@ -1658,6 +1659,9 @@ class App:
                                 "but silent' Bluetooth — one admin OK)",
                           command=self._setup_refresh)
         m.add_separator()
+        m.add_command(label="🔁 Restart me (fixes most weirdness, incl. "
+                            "hotkeys that stopped working)",
+                      command=self.restart_self)
         m.add_command(label="⌨ Keyboard shortcuts (a reminder card)",
                       command=self._show_shortcuts)
         m.add_command(label="🗣 Read-aloud voice (pick who reads to you)",
@@ -1811,6 +1815,33 @@ class App:
                  font=("Segoe UI", 9), fg="#666666").pack(pady=(2, 6))
         tk.Button(d, text="Got it", font=("Segoe UI", 11, "bold"),
                   command=d.destroy).pack(pady=(0, 12))
+
+    def restart_self(self):
+        """The one-click 'it's acting weird' cure (Ren, 8/16: Grandma will
+        just think it's broken). Hotkeys can die silently after sleep/lock
+        (Windows evicts slow hooks) but the MOUSE still works — so a
+        clickable restart is always reachable exactly when it's needed.
+        Releases the mic stream gently, then relaunches fresh."""
+        log("self-restart requested (fixes dead hotkeys and general weird)")
+        try:
+            self.rec.recording = False
+            self.rec.set_warm(False)
+            if self.rec.stream:
+                try:
+                    self.rec.stream.stop(); self.rec.stream.close()
+                except Exception:
+                    pass
+                self.rec.stream = None
+        except Exception:
+            pass
+        if getattr(sys, "frozen", False):
+            subprocess.Popen([sys.executable],
+                             creationflags=subprocess.CREATE_NO_WINDOW,
+                             close_fds=True)
+        else:
+            subprocess.Popen([sys.executable, os.path.abspath(__file__)],
+                             close_fds=True)
+        self.root.destroy()
 
     def shutdown(self):
         """Close GENTLY: release the mic stream BEFORE the window dies.
