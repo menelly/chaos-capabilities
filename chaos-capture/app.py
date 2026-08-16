@@ -1111,11 +1111,23 @@ class App:
             self.set_state("think")
             self._await_flow(8.0)
         else:
+            # GRACE TAIL (Ren, 8/16): humans press 'done' WHILE saying the
+            # last word, so an instant stop clips it. Card flips to thinking
+            # right away (the press feels received), but the mic keeps
+            # listening ~2 more seconds to catch the words still in flight.
+            if getattr(self, "_stopping", False):
+                return  # tail already running; ignore double-press
+            self._stopping = True
             self.set_state("think")
-            def work():
-                text = self.rec.stop_and_text()
-                self.root.after(0, lambda: self._deliver(text))
-            threading.Thread(target=work, daemon=True).start()
+            def finish():
+                def work():
+                    try:
+                        text = self.rec.stop_and_text()
+                    finally:
+                        self._stopping = False
+                    self.root.after(0, lambda: self._deliver(text))
+                threading.Thread(target=work, daemon=True).start()
+            self.root.after(2000, finish)
 
     def _await_flow(self, deadline):
         if not self.rec.recording:
