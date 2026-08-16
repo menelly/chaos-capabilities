@@ -833,6 +833,8 @@ class App:
         self.tts_engine = "windows" # "windows" | "inworld" | "elevenlabs"
         self.tts_voice = None       # None = engine default
         self.read_active = False    # read-aloud running (card button glows)
+        self.private_read = False   # ON = local Windows voice only; the
+                                    # cloud voice choice is remembered under it
         self.imgs = {}
         self._load_settings()
 
@@ -1081,6 +1083,7 @@ class App:
             self.bg_dim = s.get("bg_dim", None)
             if self.bg_dim is not None:
                 self.bg_dim = float(self.bg_dim)
+            self.private_read = bool(s.get("private_read", False))
             p = s.get("pos")
             if (isinstance(p, list) and len(p) == 2
                     and all(isinstance(v, int) for v in p)):
@@ -1100,6 +1103,7 @@ class App:
                            "tts_voice": getattr(self, "tts_voice", None),
                            "v2_theme": getattr(self, "v2_theme", "octopus"),
                            "bg_dim": getattr(self, "bg_dim", None),
+                           "private_read": getattr(self, "private_read", False),
                            "pos": (list(self.saved_pos)
                                    if self.saved_pos else None)}, f)
         except Exception:
@@ -1393,9 +1397,13 @@ class App:
         except Exception:
             print("clipboard is empty — copy something first."); return
         import voices
+        eng = "windows" if getattr(self, "private_read", False) else self.tts_engine
+        vc = None if getattr(self, "private_read", False) else self.tts_voice
+        if getattr(self, "private_read", False):
+            log("private read: local Windows voice, nothing leaves this computer")
         def run():
             try:
-                voices.speak(text, self.tts_engine, self.tts_voice)
+                voices.speak(text, eng, vc)
             finally:   # 🔊 + card button glow while reading, rest when done
                 def done():
                     self.read_active = False
@@ -1601,6 +1609,12 @@ class App:
                           lambda t=t: self._set("theme_pref", t)))
         items.append(("🔁 Am I acting weird? Restart me", self.restart_self))
         items.append(("⌨ Keyboard shortcuts card", self._show_shortcuts))
+        pr = getattr(self, "private_read", False)
+        items.append((("🔒 Private reading: ON — click to use your chosen "
+                       "voice again" if pr else
+                       "🔒 Read privately (this computer only)"),
+                      lambda: (setattr(self, "private_read", not pr),
+                               self._save_settings())))
         items.append(("🗣 Read-aloud voice settings", self._voice_settings))
         items.append(("📖 My dictionary", self._edit_dictionary))
         items.append(("🪄 Setup helper (wizard)", lambda: Wizard(self)))
@@ -1672,6 +1686,15 @@ class App:
                       command=self.restart_self)
         m.add_command(label="⌨ Keyboard shortcuts (a reminder card)",
                       command=self._show_shortcuts)
+        pr = getattr(self, "private_read", False)
+        m.add_command(
+            label=("🔒 PRIVATE READING ON (this computer only) — click to "
+                   "return to your chosen voice" if pr else
+                   "🔒 Read privately (this computer only) — your voice "
+                   "choice is remembered"),
+            command=lambda: (setattr(self, "private_read", not pr),
+                             self._save_settings(),
+                             log("private read: " + ("ON" if not pr else "off"))))
         m.add_command(label="🗣 Read-aloud voice (pick who reads to you)",
                       command=self._voice_settings)
         m.add_command(label="📖 My dictionary (names it should spell right)",
