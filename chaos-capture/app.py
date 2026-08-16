@@ -273,6 +273,22 @@ class Recorder:
         if self.cancelled or not self.frames:
             return ""
         audio = np.concatenate(self.frames)
+        # Trim the grace tail's trailing silence: the mic stays open ~2s
+        # after 'done' to catch in-flight words, but speech models given
+        # dead air tend to LOOP their last phrase (found by Ren minutes
+        # after the tail shipped). Keep last real sound + 0.3s of breath.
+        if len(audio) > SAMPLE_RATE:
+            a = audio.flatten().astype("float32") / 32768.0
+            hop = int(0.05 * SAMPLE_RATE)
+            floor = max(0.003, float(np.sqrt(np.mean(a ** 2))) * 0.15)
+            last_voiced = len(a)
+            for i in range(len(a) - hop, 0, -hop):
+                if float(np.sqrt(np.mean(a[i:i + hop] ** 2))) > floor:
+                    last_voiced = i + hop
+                    break
+            keep = min(len(a), last_voiced + int(0.3 * SAMPLE_RATE))
+            if keep < len(a):
+                audio = audio[:keep]
         wav_path = os.path.join(tempfile.gettempdir(), "chaos_take.wav")
         with wave.open(wav_path, "wb") as w:
             w.setnchannels(1); w.setsampwidth(2); w.setframerate(SAMPLE_RATE)
