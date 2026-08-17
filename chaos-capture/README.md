@@ -80,10 +80,12 @@ and *possible* beats *perfect*.
 
 ## The themes (yes, accessible software gets ART)
 
-| | | | |
-|:---:|:---:|:---:|:---:|
-| ![octopus](art/v2/octopus/background.png) | ![high contrast bees](art/v2/high%20contrast%20bees/background.png) | ![unicorn](art/v2/unicorn/background.png) | ![red pandas](art/v2/red%20pandas/background.png) |
-| **octopus** | **high contrast bees** | **unicorn** | **red pandas** |
+<table><tr>
+<td align="center"><img src="art/v2/octopus/background.png" width="190" alt="octopus theme"><br><b>octopus</b></td>
+<td align="center"><img src="art/v2/high contrast bees/background.png" width="190" alt="high contrast bees theme"><br><b>high contrast bees</b></td>
+<td align="center"><img src="art/v2/unicorn/background.png" width="190" alt="unicorn theme"><br><b>unicorn</b></td>
+<td align="center"><img src="art/v2/red pandas/background.png" width="190" alt="red pandas theme"><br><b>red pandas</b></td>
+</tr></table>
 
 Painted by **Nova** (GPT — yes, an AI artist, signed and dated like any
 artist) with button sets art-directed by Ren. High contrast bees is
