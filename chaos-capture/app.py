@@ -363,6 +363,25 @@ V2_AUX3 = {"warm": (0.245, 0.75, 0.098),  # with refresh available
            "menu": (0.755, 0.75, 0.098)}
 V2_AUX2 = {"warm": (0.34, 0.75, 0.098),   # refresh helper not installed
            "menu": (0.66, 0.75, 0.098)}
+# 2×2 layouts (Ren's redesign, 8/17): once addword.png art exists, the big
+# pair rises and the small buttons form pairs — larger targets than three
+# crammed in one row. Layout picks itself from what art/helpers exist.
+V2_MIC_HI = (0.28, 0.38, 0.179)
+V2_READ_HI = (0.72, 0.38, 0.179)
+V2_AUX22 = {"warm": (0.30, 0.625, 0.105),     # warm + refresh
+            "refresh": (0.70, 0.625, 0.105),
+            "menu": (0.30, 0.815, 0.105),     # menu + add-a-word
+            "addword": (0.70, 0.815, 0.105)}
+V2_AUX_WA = {"warm": (0.30, 0.625, 0.105),    # no refresh helper: add-word
+             "addword": (0.70, 0.625, 0.105), # partners warm, menu centers
+             "menu": (0.50, 0.815, 0.105)}    # below — no lonely corners
+# rows sit high deliberately (art director's call, 8/17): the bottom margin
+# belongs to Nova's signature. Buttons do not stand on the artist's name.
+
+
+def have_v2_addword():
+    return any(os.path.exists(os.path.join(v2_dir(t), "addword.png"))
+               for t in v2_themes())
 
 
 def have_v2():
@@ -901,10 +920,8 @@ class App:
                 self._has_refresh = True
                 self.imgs = {k: v for k, v in self.imgs.items()
                              if not (isinstance(k, tuple) and k[0] == "v2")}
-                def show():
-                    self.bt_btn.pack(side="left", after=self.warm_btn)
-                    self._refresh()
-                self.root.after(0, show)
+                # _refresh → _clamp_header reflows the strip with 🔄 included
+                self.root.after(0, self._refresh)
         threading.Thread(target=_probe, daemon=True).start()
 
         root.overrideredirect(True)
@@ -920,40 +937,38 @@ class App:
         HDR_FONT = ("Segoe UI", 13)
         self.header = tk.Frame(root, bg="#221833", height=36)
         self.header.pack()
-        self.header.pack_propagate(False)   # width clamped to the art in
+        self.header.pack_propagate(False)   # (children are grid-managed;
+        self.header.grid_propagate(False)   # both off) width clamped in
         # _refresh, so the strip's edges line up with the card's edges
         # (Ren, 8/15: misaligned edges are not "good enough")
         self.grip = tk.Label(self.header, text=" ⠿ ", fg="#9a86b8",
                              bg="#221833", font=HDR_FONT, cursor="fleur")
-        self.grip.pack(side="left")
         self.mic_btn = tk.Label(self.header, text="🎙", fg="#9a86b8",
                                 bg="#221833", font=HDR_FONT, cursor="hand2")
-        self.mic_btn.pack(side="left")
         self.mic_btn.bind("<ButtonRelease-1>", lambda e: self.toggle())
         self.read_hdr = tk.Label(self.header, text=" 🔊", fg="#9a86b8",
                                  bg="#221833", font=HDR_FONT, cursor="hand2")
-        self.read_hdr.pack(side="left")
         self.read_hdr.bind("<ButtonRelease-1>", lambda e: self.read_clipboard())
         self.warm_btn = tk.Label(self.header, text=" 🔥", fg="#5a4a6e",
                                  bg="#221833", font=HDR_FONT, cursor="hand2")
-        self.warm_btn.pack(side="left")
         self.warm_btn.bind("<ButtonRelease-1>", lambda e: self.toggle_warm())
         self.bt_btn = tk.Label(self.header, text=" 🔄", fg="#9a86b8",
                                bg="#221833", font=HDR_FONT, cursor="hand2")
-        # 🔄 packs only if the helper task exists (see the startup probe)
+        # 🔄 appears only if the helper task exists (see the startup probe)
         self.bt_btn.bind("<ButtonRelease-1>", lambda e: self._do_bt_refresh())
         self.close_btn = tk.Label(self.header, text="✕ ", fg="#9a86b8",
                                   bg="#221833", font=HDR_FONT, cursor="hand2")
-        self.close_btn.pack(side="right")
         self.close_btn.bind("<ButtonRelease-1>", lambda e: self.shutdown())
         self.gear = tk.Label(self.header, text=" ⚙ ", fg="#9a86b8",
                              bg="#221833", font=HDR_FONT, cursor="hand2")
-        self.gear.pack(side="right")
         self.gear.bind("<ButtonRelease-1>", self._menu)
         self.min_btn = tk.Label(self.header, text="─ ", fg="#9a86b8",
                                 bg="#221833", font=HDR_FONT, cursor="hand2")
-        self.min_btn.pack(side="right")
         self.min_btn.bind("<ButtonRelease-1>", lambda e: self.minimize())
+        # children are laid out by _reflow_header (called via _clamp_header
+        # on every redraw): one row when they fit the card's width, two
+        # rows when they don't — a small card wore a header wider than
+        # itself (Ren, 8/17: "the banner on the top is still ridiculous")
         self.dot = None  # the minimized state's tiny dot
         for w in (self.header, self.grip):
             w.bind("<ButtonPress-1>", self._press)
@@ -1068,8 +1083,10 @@ class App:
             self.card.pack_forget()
             self.read_btn.pack_forget()
             self.header.pack_propagate(True)   # natural strip width
+            self.header.grid_propagate(True)
         else:
             self.header.pack_propagate(False)
+            self.header.grid_propagate(False)
             self._apply_features()
             self._refresh()
         self.root.update_idletasks()
@@ -1090,8 +1107,22 @@ class App:
     def theme(self):
         return windows_theme() if self.theme_pref == "auto" else self.theme_pref
 
+    def _v2_layout(self):
+        """(mic, read, aux) for the current world: 2×2 once addword art
+        exists, the classic rows until then. Checked live so the button
+        appears the moment the artist drops the file in — no restart."""
+        has_r = getattr(self, "_has_refresh", False)
+        has_a = have_v2_addword()
+        if has_a and has_r:
+            return V2_MIC_HI, V2_READ_HI, V2_AUX22
+        if has_a:
+            return V2_MIC_HI, V2_READ_HI, V2_AUX_WA
+        if has_r:
+            return V2_MIC, V2_READ, V2_AUX3
+        return V2_MIC, V2_READ, V2_AUX2
+
     def _v2_aux(self):
-        return V2_AUX3 if getattr(self, "_has_refresh", False) else V2_AUX2
+        return self._v2_layout()[2]
 
     def _img_v2(self, w):
         """Nova's v2 composite: nebula background + LISTEN and READ ALOUD
@@ -1099,8 +1130,10 @@ class App:
         (mic-state, reading?, warm, width)."""
         warm = getattr(self.rec, "warm", False)
         reading = getattr(self, "read_active", False)
+        mic_pos, read_pos, aux = self._v2_layout()
         key = ("v2", self.v2_theme, self.state, reading, warm,
-               getattr(self, "bt_ok", False), getattr(self, "bg_dim", None), w)
+               getattr(self, "bt_ok", False), getattr(self, "bg_dim", None),
+               tuple(sorted(aux)), w)
         if key not in self.imgs:
             h = int(w * V2_ASPECT)
             tdir = v2_dir(self.v2_theme)
@@ -1156,14 +1189,15 @@ class App:
                 c.alpha_composite(im, (int(cx * w - im.width / 2),
                                        int(cy * h - im.height / 2)))
 
-            put(V2_STATE_ART[self.state], *V2_MIC)
-            draw_ring(*V2_MIC)
-            put("read.png", *V2_READ, dim=not reading)
-            draw_ring(*V2_READ)
-            aux = self._v2_aux()
+            put(V2_STATE_ART[self.state], *mic_pos)
+            draw_ring(*mic_pos)
+            put("read.png", *read_pos, dim=not reading)
+            draw_ring(*read_pos)
             for pos in aux.values():
                 draw_ring(*pos)
             put("keepwarm.png", *aux["warm"], dim=not warm)
+            if "addword" in aux:
+                put("addword.png", *aux["addword"])
             if "refresh" in aux:
                 if getattr(self, "bt_ok", False):
                     # green halo = the microphone link is verifiably alive
@@ -1188,7 +1222,11 @@ class App:
         return self.imgs[key]
 
     def _refresh(self):
-        w = max(120, int(220 * self.scale))
+        # base 240 (was 220): the full header row with 🔄 needs ~225px, so
+        # 220 wrapped the FULL-SIZE card to two rows over five pixels. The
+        # card widened instead — full size is single-row, period (Ren,
+        # 8/17: "that will annoy the shit out of me"); small sizes wrap.
+        w = max(120, int(240 * self.scale))
         art = have_art() and self.skin == "illustrated"
         if self.skin == "illustrated" and have_v2():
             self.card.configure(image=self._img_v2(w))
@@ -1223,15 +1261,43 @@ class App:
         self.read_btn.configure(image=self.imgs[bkey])
 
     def _clamp_header(self, card_w):
-        """Header strip width = the card's width exactly (or the buttons'
-        minimum if they genuinely need more) — edges line up with the art."""
+        """Header strip width = the card's width exactly; the buttons
+        re-flow to two rows when one row genuinely can't fit (small cards
+        were wearing a header wider than themselves)."""
         try:
-            need = sum(ch.winfo_reqwidth()
-                       for ch in self.header.winfo_children()
-                       if ch.winfo_manager())
-            self.header.configure(width=max(card_w, need))
+            self._reflow_header(card_w)
         except Exception:
             pass
+
+    def _reflow_header(self, card_w):
+        left = [self.grip, self.mic_btn, self.read_hdr, self.warm_btn]
+        if getattr(self, "_has_refresh", False):
+            left.append(self.bt_btn)
+        right = [self.min_btn, self.gear, self.close_btn]
+        for k in left + right + [self.bt_btn]:
+            k.grid_forget()
+            k.place_forget()
+        for c in range(12):   # clear stale stretch weights between modes
+            self.header.grid_columnconfigure(c, weight=0)
+        need = sum(k.winfo_reqwidth() for k in left + right)
+        line = max(k.winfo_reqheight() for k in left + right)
+        rows = 2 if need > max(card_w, 130) else 1
+        for i, k in enumerate(left):
+            k.grid(row=0, column=i, sticky="w")
+        if rows == 1:
+            self.header.grid_columnconfigure(len(left), weight=1)  # spacer
+            for j, k in enumerate(right):
+                k.grid(row=0, column=len(left) + 1 + j, sticky="e")
+        else:
+            # row 2 hugs the card's RIGHT EDGE by placement, not by grid
+            # columns — v1 put it in columns past the spacer and a narrow
+            # card CLIPPED exactly the window controls off the right edge
+            # ("we lost the ones that matter" — Ren, 8/17, within minutes)
+            xoff = -2
+            for k in (self.close_btn, self.gear, self.min_btn):
+                k.place(relx=1.0, y=line, x=xoff, anchor="ne")
+                xoff -= k.winfo_reqwidth()
+        self.header.configure(width=card_w, height=line * rows + 2)
 
     def set_state(self, s):
         self.state = s
@@ -1276,13 +1342,14 @@ class App:
 
     def _v2_hit(self, x, y):
         w, h = self.card.winfo_width(), self.card.winfo_height()
+        mic_pos, read_pos, aux = self._v2_layout()
         def inside(cx, cy, r):
             return ((x - w * cx) ** 2 + (y - h * cy) ** 2) ** 0.5 <= w * r
-        if inside(*V2_MIC):
+        if inside(*mic_pos):
             return "state"
-        if inside(*V2_READ):
+        if inside(*read_pos):
             return "read"
-        for name, box in self._v2_aux().items():
+        for name, box in aux.items():
             if inside(*box):
                 return name
         return None
@@ -1299,6 +1366,10 @@ class App:
                     self.toggle_warm()
                 elif hit == "refresh":
                     self._do_bt_refresh()
+                elif hit == "addword":
+                    # works because the widget never steals focus: the
+                    # user's selection in their document is still live
+                    self.add_selection_to_dictionary()
                 elif hit == "menu":
                     self._menu(e)
             else:
@@ -1784,14 +1855,17 @@ class App:
             pass
         try:
             if keyboard:
-                # the user is still holding Ctrl+Alt from the hotkey —
-                # release them first or our Ctrl+C becomes Ctrl+Alt+C
-                for k in ("alt", "ctrl"):
-                    try:
-                        keyboard.release(k)
-                    except Exception:
-                        pass
-                time.sleep(0.05)
+                # WAIT for the user's fingers to actually leave the keys.
+                # v1 virtually released Ctrl/Alt while they were physically
+                # held — a race with two losing outcomes, both hit by Ren
+                # within one minute of testing: Alt released first turned
+                # the held A into Ctrl+A (selected the whole paragraph);
+                # both released turned key-repeat into a plain "a" typed
+                # over the selection. Patience instead of puppetry.
+                deadline = time.time() + 1.5
+                while time.time() < deadline and any(
+                        keyboard.is_pressed(k) for k in ("ctrl", "alt", "a")):
+                    time.sleep(0.02)
                 self.root.clipboard_clear()
                 keyboard.send("ctrl+c")
                 time.sleep(0.18)
@@ -2068,11 +2142,7 @@ class App:
                     self._has_refresh = True
                     self.imgs = {k: v for k, v in self.imgs.items()
                                  if not (isinstance(k, tuple) and k[0] == "v2")}
-                    try:
-                        self.bt_btn.pack(side="left", after=self.warm_btn)
-                    except Exception:
-                        pass
-                    self._refresh()
+                    self._refresh()   # reflow picks up the 🔄 button
                     messagebox.showinfo(
                         "Bluetooth refresh ready ✓",
                         "The 🔄 button is now on the card and the top strip. "
