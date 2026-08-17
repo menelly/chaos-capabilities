@@ -579,9 +579,11 @@ class Wizard:
         self.win = tk.Toplevel(app.root)
         self.win.title("Welcome to Chaos Capture")
         self.win.attributes("-topmost", True)
-        self.win.geometry("560x480")
+        self.win.geometry("560x540")
+        self.win.minsize(500, 440)
         self.win.configure(bg="white")
         self.frame = None
+        self.navbar = None
         self.step = 0
         self.steps = [self.s_welcome, self.s_features, self.s_engine,
                       self.s_voice, self.s_bluetooth, self.s_theme,
@@ -589,14 +591,23 @@ class Wizard:
         self.show()
 
     def _clear(self):
+        # The nav bar belongs to the WINDOW and is packed BEFORE the content
+        # frame, so tk gives it space first: a wordy step (or big DPI-scaled
+        # fonts) can never squeeze the Next button out of view. Beta tester
+        # bug #2, 2026-08-17: on the voice step the Next button was invisible
+        # until the window was resized. Buttons you have to hunt for fail
+        # the Grandma test harder than anything else in the app.
         if self.frame:
             self.frame.destroy()
+        if self.navbar:
+            self.navbar.destroy()
+        self.navbar = tk.Frame(self.win, bg="white")
+        self.navbar.pack(side="bottom", fill="x", padx=28, pady=(0, 16))
         self.frame = tk.Frame(self.win, bg="white")
-        self.frame.pack(fill="both", expand=True, padx=28, pady=20)
+        self.frame.pack(fill="both", expand=True, padx=28, pady=(20, 8))
 
     def _nav(self, next_ok=True, last=False):
-        bar = tk.Frame(self.frame, bg="white")
-        bar.pack(side="bottom", fill="x", pady=(16, 0))
+        bar = self.navbar
         if self.step > 0:
             tk.Button(bar, text="◀ Back", font=self.F_BTN, padx=14, pady=6,
                       command=self.back).pack(side="left")
