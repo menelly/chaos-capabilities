@@ -1977,7 +1977,15 @@ class App:
                              creationflags=subprocess.CREATE_NO_WINDOW,
                              close_fds=True)
         else:
-            subprocess.Popen([sys.executable, os.path.abspath(__file__)],
+            # prefer the console-less interpreter: restarting a source run
+            # with python.exe hands the widget a terminal window it then
+            # carries around forever (Ren, 8/17: "is it supposed to?")
+            exe = sys.executable
+            w = os.path.join(os.path.dirname(exe), "pythonw.exe")
+            if os.path.exists(w):
+                exe = w
+            subprocess.Popen([exe, os.path.abspath(__file__)],
+                             creationflags=subprocess.CREATE_NO_WINDOW,
                              close_fds=True)
         self.root.destroy()
 
