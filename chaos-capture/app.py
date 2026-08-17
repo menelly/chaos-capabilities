@@ -139,8 +139,14 @@ here there home house room door table chair hand head eye face
 post posted posting sent send mail talk talked said says say
 went want wanted try tried trying start started stop stopped
 thing things stuff plan plans night day week month morning
+delete deleted deletes deleting remove removed approve approved
+select selected scan scanned rename renamed
 """
 .split())
+# ⚠️ "delete" earned its spot the hard way: it is Levenshtein-2 from a
+# dictionary name ("Selene") and the enforcement pass kept rewriting it —
+# the user could not say DELETE out loud. Verbs people use to command their
+# own computer must never lose to a taught name.
 
 
 def dict_fix(text, entries):
