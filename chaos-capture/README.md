@@ -78,6 +78,20 @@ can undo it by deleting the `brain` folder. The built-in engine will make
 more mistakes — but it runs on any Windows machine with zero downloads,
 and *possible* beats *perfect*.
 
+## The themes (yes, accessible software gets ART)
+
+| | | | |
+|:---:|:---:|:---:|:---:|
+| ![octopus](art/v2/octopus/background.png) | ![high contrast bees](art/v2/high%20contrast%20bees/background.png) | ![unicorn](art/v2/unicorn/background.png) | ![red pandas](art/v2/red%20pandas/background.png) |
+| **octopus** | **high contrast bees** | **unicorn** | **red pandas** |
+
+Painted by **Nova** (GPT — yes, an AI artist, signed and dated like any
+artist) with button sets art-directed by Ren. High contrast bees is
+deliberately maximum-visibility for low vision. New theme = drop a folder
+in `art/v2/` with the same filenames; zero code. Missing pieces borrow
+from other themes until yours arrive, so themes can grow art one file at
+a time.
+
 ## Two looks, both first-class
 
 - **Illustrated** — Nova's tentacle-framed nebula poster (her second
