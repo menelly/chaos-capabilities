@@ -280,15 +280,23 @@ class Recorder:
         if len(audio) > SAMPLE_RATE:
             a = audio.flatten().astype("float32") / 32768.0
             hop = int(0.05 * SAMPLE_RATE)
-            floor = max(0.003, float(np.sqrt(np.mean(a ** 2))) * 0.15)
-            last_voiced = len(a)
-            for i in range(len(a) - hop, 0, -hop):
-                if float(np.sqrt(np.mean(a[i:i + hop] ** 2))) > floor:
-                    last_voiced = i + hop
-                    break
-            keep = min(len(a), last_voiced + int(0.3 * SAMPLE_RATE))
-            if keep < len(a):
-                audio = audio[:keep]
+            n = len(a) // hop
+            hops = np.sqrt(np.mean(a[:n * hop].reshape(n, hop) ** 2, axis=1))
+            # The threshold must come from the room's SILENCE, not the
+            # speaker's LOUDNESS. v1 used global RMS * 0.15 — so a strong
+            # speaker's own trailing word (humans let sentence-ends fall
+            # off) landed under the bar and got eaten (Ren, 8/17: "it is
+            # yet again cutting off my last word"). Noise floor = the
+            # quietest fifth of the take; voiced = clearly above THAT.
+            noise = float(np.percentile(hops, 20))
+            floor = max(0.003, noise * 3.0)
+            voiced = np.nonzero(hops > floor)[0]
+            if len(voiced):
+                keep = min(len(a),
+                           (int(voiced[-1]) + 1) * hop
+                           + int(0.45 * SAMPLE_RATE))
+                if keep < len(a):
+                    audio = audio[:keep]
         wav_path = os.path.join(tempfile.gettempdir(), "chaos_take.wav")
         with wave.open(wav_path, "wb") as w:
             w.setnchannels(1); w.setsampwidth(2); w.setframerate(SAMPLE_RATE)
@@ -1437,8 +1445,12 @@ class App:
         note = tk.Label(d, text="", font=("Segoe UI", 9), fg="#666666",
                         wraplength=340, justify="left")
 
-        tk.Label(d, text="Voice:", font=("Segoe UI", 10)).pack(anchor="w", **pad)
-        voice_box = ttk.Combobox(d, state="readonly", width=40)
+        tk.Label(d, text="Voice (pick one, or paste a voice ID straight in):",
+                 font=("Segoe UI", 10)).pack(anchor="w", **pad)
+        # NOT readonly: BYO-key users are, definitionally, people who can
+        # paste an ID — "anybody adept enough to paste an API key can paste
+        # a voice ID; Grandma Jane is not pasting an API key" (Ren, 8/17).
+        voice_box = ttk.Combobox(d, width=40)
         voice_box.pack(**pad)
         vmap = {}   # label -> voice id
 
@@ -1448,6 +1460,27 @@ class App:
                 vs = voices.list_windows_voices()
             else:
                 vs = voices.cached_catalog(eng)
+                if not vs and voices.load_key(eng):
+                    # saved key but never-fetched catalog: fetch it now in
+                    # the background instead of showing an empty list (the
+                    # empty list read as "not letting me change the voice"
+                    # — Ren, 8/17, first morning on the migrated widget)
+                    status.config(text="Fetching your voice list…",
+                                  fg="#666666")
+                    def fetch():
+                        try:
+                            got = voices.list_provider_voices(
+                                eng, voices.load_key(eng))
+                            voices.cache_catalog(eng, got)
+                            self.root.after(0, load_voices)
+                            self.root.after(0, lambda: status.config(
+                                text=f"{len(got)} voices loaded ✓",
+                                fg="#2e7d32"))
+                        except Exception as e:
+                            self.root.after(0, lambda: status.config(
+                                text=f"couldn't fetch voices: {e}",
+                                fg="#c62828"))
+                    threading.Thread(target=fetch, daemon=True).start()
             vmap.clear()
             labels = ["(default)"]
             for vid, label in vs:
@@ -1506,9 +1539,22 @@ class App:
                   command=test_and_save).pack(side="left", padx=4)
 
         def save():
-            self.tts_engine = eng_var.get()
-            sel = voice_box.get()
-            self.tts_voice = vmap.get(sel)   # "(default)" -> None
+            eng = eng_var.get()
+            # A pasted key gets saved BY THE SAVE BUTTON. v1 only saved it
+            # via "Test key" — so pasting a key and pressing Save (the
+            # obvious human move; Ren made it within a day) silently threw
+            # the key away and left an engine with no credentials.
+            pasted = key_var.get().strip()
+            if pasted and eng != "windows":
+                voices.save_key(eng, pasted)
+            self.tts_engine = eng
+            sel = voice_box.get().strip()
+            if sel in vmap or sel == "(default)" or not sel:
+                self.tts_voice = vmap.get(sel)   # "(default)" -> None
+            else:
+                # not one of our labels: the power user pasted a raw
+                # voice ID — take them at their word
+                self.tts_voice = sel
             self._save_settings()
             d.destroy()
         tk.Button(btns, text="Save", font=("Segoe UI", 10, "bold"),
