@@ -29,7 +29,7 @@ ENGINES:
   --engine windows  Windows built-in speech recognition (zero installs, any PC)
 """
 
-import os, sys, time, threading, tempfile, subprocess, wave, json, argparse
+import os, re, sys, time, threading, tempfile, subprocess, wave, json, argparse
 
 import tkinter as tk
 
@@ -100,6 +100,125 @@ def have_local():
         return True
     except ImportError:
         return False
+
+
+def dict_entries():
+    try:
+        with open(DICT_PATH, encoding="utf-8") as f:
+            return [w.strip() for w in f if w.strip()
+                    and not w.startswith("#")]
+    except FileNotFoundError:
+        return []
+
+
+# Words the enforcement pass may NEVER touch: real, common English. Within
+# an hour of dict_fix going live it rewrote a message to a doctor's office
+# as "my Medicare advocate TOAD me that she was FABLE to cancel my
+# colonoscopy" (and "from" -> "Frog") — the user's dictionary contained
+# Toad, Fable and Frog, each one edit from a common word. A personal
+# dictionary corrects the engine's fumbles on RARE words; it must never
+# beat ordinary English into proper nouns.
+COMMON_WORDS = frozenset("""
+the be to of and a in that have i it for not on with he as you do at this
+but his by from they we say her she or an will my one all would there
+their what so up out if about who get which go me when make can like time
+no just him know take people into year your good some could them see other
+than then now look only come its over think also back after use two how
+our work first well way even new want because any these give day most us
+is was are been has had were said did having may should am its who whom
+told able unable was were being does done went gone came saw seen made
+found left right still even ever never always often once again more less
+very much many few both each every either neither same different next last
+under between through during before after above below off down while
+where why yes no not nor too also instead rather quite almost around
+told tell asked ask call called calls need needs needed help helped
+feel felt felt keep kept let lets put puts ran run runs walk walked
+long short high low big small great little old young early late hard
+easy fast slow hot cold warm cool full empty open closed near far
+here there home house room door table chair hand head eye face
+post posted posting sent send mail talk talked said says say
+went want wanted try tried trying start started stop stopped
+thing things stuff plan plans night day week month morning
+"""
+.split())
+
+
+def dict_fix(text, entries):
+    """THE ENFORCEMENT PASS. The dictionary rides into the engine as a
+    prompt bias, and a bias is a polite suggestion the model is free to
+    ignore — Ren watched 'Selene' get added and the very next take still
+    wrote 'Celine' (8/17: "it is adding things to the dictionary, but it
+    is not actually improving things"). So after transcription, any word
+    (or small word-run: 'barda corn') that is a NEAR-MISS for a dictionary
+    entry becomes the dictionary's spelling, deterministically. Your
+    dictionary is law, not advice."""
+    if not text or not entries:
+        return text
+
+    def lev(a, b):
+        if abs(len(a) - len(b)) > 3:
+            return 99
+        prev = list(range(len(b) + 1))
+        for ii, ca in enumerate(a, 1):
+            cur = [ii]
+            for jj, cb in enumerate(b, 1):
+                cur.append(min(prev[jj] + 1, cur[-1] + 1,
+                               prev[jj - 1] + (ca != cb)))
+            prev = cur
+        return prev[-1]
+
+    strip_re = re.compile(r"[^\w']+")
+    norm = lambda s: strip_re.sub("", s).lower()
+    toks = text.split()
+    out = []
+    i = 0
+    while i < len(toks):
+        best = None
+        for e in entries:
+            span_base = len(e.split())
+            target = norm(e)
+            if len(target) < 4:
+                continue    # short entries: too easy to false-match
+            allowed = 1 if len(target) <= 5 else (2 if len(target) <= 8
+                                                  else 3)
+            for span in {span_base, span_base + 1, max(1, span_base - 1)}:
+                if i + span > len(toks):
+                    continue
+                chunk = toks[i:i + span]
+                core = norm("".join(chunk))
+                if not core:
+                    continue
+                if core in COMMON_WORDS:
+                    continue    # real English is never a "fumble"
+                if span > 1 and all(norm(t) in COMMON_WORDS
+                                    for t in chunk if norm(t)):
+                    # a RUN of ordinary words is ordinary English too —
+                    # "post in" (joined: 'postin') was two letters from
+                    # 'Dustin' and the pass told Kairo that Ren "did
+                    # Dustin a few Reddits last night" (8/17, 9:10am)
+                    continue
+                if span < span_base and core in target:
+                    # partial of a multiword entry ("Rana" inside
+                    # "Dr. Rana"): the speaker said only part of it —
+                    # expanding it fabricates words they never said
+                    continue
+                d = lev(core, target)
+                if d <= allowed and (best is None or d < best[0]):
+                    best = (d, span, e, chunk)
+        if best:
+            _, span, e, chunk = best
+            joined = " ".join(chunk)
+            lead = re.match(r"^\W*", chunk[0]).group(0)
+            tail = re.search(r"[^\w']*$", chunk[-1]).group(0)
+            fixed = lead + e + tail
+            if joined != fixed:
+                log(f"dictionary fix: {joined!r} -> {e!r}")
+            out.append(fixed)
+            i += span
+        else:
+            out.append(toks[i])
+            i += 1
+    return " ".join(out)
 
 
 def transcribe_local(wav_path, hotwords):
@@ -254,13 +373,7 @@ class Recorder:
             self.stream = None
 
     def _dictionary(self):
-        try:
-            with open(DICT_PATH, encoding="utf-8") as f:
-                words = [w.strip() for w in f if w.strip()
-                         and not w.startswith("#")]
-            return ", ".join(words)
-        except FileNotFoundError:
-            return ""
+        return ", ".join(dict_entries())
 
     def stop_and_text(self):
         self.recording = False
@@ -303,10 +416,13 @@ class Recorder:
             w.writeframes(audio.tobytes())
         try:
             if self.engine == "local":
-                return transcribe_local(wav_path, self._dictionary())
-            if self.engine == "windows" and have_brain():
-                return transcribe_brain(wav_path, self._dictionary())
-            return transcribe_windows(wav_path, self._dictionary())
+                text = transcribe_local(wav_path, self._dictionary())
+            elif self.engine == "windows" and have_brain():
+                text = transcribe_brain(wav_path, self._dictionary())
+            else:
+                text = transcribe_windows(wav_path, self._dictionary())
+            # prompt bias asks; dict_fix ENFORCES (all engines alike)
+            return dict_fix(text, dict_entries())
         except Exception as e:
             print(f"transcription failed: {e.__class__.__name__}: {e}")
             return ""
@@ -991,42 +1107,19 @@ class App:
         root.bind("<Escape>", lambda e: self._cancel())
         self._drag_start, self._moved = None, False
 
-        if keyboard:
-            try:
-                keyboard.add_hotkey("ctrl+alt+d",
-                                    lambda: root.after(0, self.toggle))
-                keyboard.add_hotkey("ctrl+alt+r",
-                                    lambda: root.after(0, self.read_clipboard))
-                keyboard.add_hotkey("ctrl+alt+m",
-                                    lambda: root.after(0, self._menu_kb),
-                                    suppress=True)  # swallow the keystroke:
-                # other apps bind Ctrl+Alt+M too (Claude Code flips its
-                # permission mode!) and must not ALSO react to our menu key
-                keyboard.add_hotkey("ctrl+alt+h",
-                                    lambda: root.after(0, self.minimize))
-                keyboard.add_hotkey("ctrl+alt+q",
-                                    lambda: root.after(0, self.shutdown))
-                keyboard.add_hotkey("ctrl+alt+w",
-                                    lambda: root.after(0, self.toggle_warm))
-                keyboard.add_hotkey("ctrl+alt+a",
-                                    lambda: root.after(
-                                        0, self.add_selection_to_dictionary),
-                                    suppress=True)  # screenshot tools etc.
-                # also bind Ctrl+Alt+A; ours must win (CHA-504)
-                for arrow, dx, dy in (("left", -40, 0), ("right", 40, 0),
-                                      ("up", 0, -40), ("down", 0, 40)):
-                    keyboard.add_hotkey(
-                        f"ctrl+alt+{arrow}",
-                        lambda dx=dx, dy=dy: root.after(
-                            0, lambda: self.nudge(dx, dy)))
-                for num, corner in (("1", "tl"), ("2", "tr"),
-                                    ("3", "bl"), ("4", "br")):
-                    keyboard.add_hotkey(
-                        f"ctrl+alt+{num}",
-                        lambda c=corner: root.after(
-                            0, lambda: self.snap(c)))
-            except Exception as e:
-                print(f"(no global hotkeys: {e} — clicking still works)")
+        self._arm_hotkeys()
+        # THE WATCHDOG (Ren, 8/17: "Jane is not going to go look for that
+        # button"): Windows silently evicts keyboard hooks it thinks are
+        # slow — under CPU load (a transcribing Whisper model), after
+        # sleep/lock, when a sibling process fights over the same keys.
+        # Every death takes ALL hotkeys with it and looks like "the app
+        # broke". So the app re-arms its own hotkeys every 45 seconds,
+        # forever: an eviction becomes a sub-minute hiccup nobody has to
+        # diagnose, find a button for, or even notice. (CHA-498)
+        def _rearm_loop():
+            self._arm_hotkeys()
+            root.after(45000, _rearm_loop)
+        root.after(45000, _rearm_loop)
 
         self._apply_features()
         self._apply_header_theme()
@@ -1041,6 +1134,54 @@ class App:
         self._no_steal_focus()
         if not self.onboarded:
             root.after(400, lambda: Wizard(self))
+
+    def _arm_hotkeys(self):
+        """Register (or RE-register) every global hotkey. Safe to call any
+        time: clears our old registrations first, so a fresh call replaces
+        a dead hook. Called at startup, every 45s by the watchdog, and
+        after any settings dialog closes."""
+        if not keyboard:
+            return
+        root = self.root
+        try:
+            keyboard.unhook_all_hotkeys()
+        except Exception:
+            pass
+        try:
+            keyboard.add_hotkey("ctrl+alt+d",
+                                lambda: root.after(0, self.toggle))
+            keyboard.add_hotkey("ctrl+alt+r",
+                                lambda: root.after(0, self.read_clipboard))
+            keyboard.add_hotkey("ctrl+alt+m",
+                                lambda: root.after(0, self._menu_kb),
+                                suppress=True)  # swallow the keystroke:
+            # other apps bind Ctrl+Alt+M too (Claude Code flips its
+            # permission mode!) and must not ALSO react to our menu key
+            keyboard.add_hotkey("ctrl+alt+h",
+                                lambda: root.after(0, self.minimize))
+            keyboard.add_hotkey("ctrl+alt+q",
+                                lambda: root.after(0, self.shutdown))
+            keyboard.add_hotkey("ctrl+alt+w",
+                                lambda: root.after(0, self.toggle_warm))
+            keyboard.add_hotkey("ctrl+alt+a",
+                                lambda: root.after(
+                                    0, self.add_selection_to_dictionary),
+                                suppress=True)  # screenshot tools etc.
+            # also bind Ctrl+Alt+A; ours must win (CHA-504)
+            for arrow, dx, dy in (("left", -40, 0), ("right", 40, 0),
+                                  ("up", 0, -40), ("down", 0, 40)):
+                keyboard.add_hotkey(
+                    f"ctrl+alt+{arrow}",
+                    lambda dx=dx, dy=dy: root.after(
+                        0, lambda: self.nudge(dx, dy)))
+            for num, corner in (("1", "tl"), ("2", "tr"),
+                                ("3", "bl"), ("4", "br")):
+                keyboard.add_hotkey(
+                    f"ctrl+alt+{num}",
+                    lambda c=corner: root.after(
+                        0, lambda: self.snap(c)))
+        except Exception as e:
+            log(f"(no global hotkeys: {e} — clicking still works)")
 
     def _apply_features(self):
         """Show only what this user asked for: stt hides the read bar,
@@ -1523,6 +1664,7 @@ class App:
         # a voice ID; Grandma Jane is not pasting an API key" (Ren, 8/17).
         voice_box = ttk.Combobox(d, width=40)
         voice_box.pack(**pad)
+        voice_box.bind("<KeyRelease>", lambda e: filter_voices())
         vmap = {}   # label -> voice id
 
         def load_voices():
@@ -1558,11 +1700,27 @@ class App:
                 vmap[label] = vid
                 labels.append(label)
             voice_box["values"] = labels
+            voice_box._all_labels = labels
             cur = "(default)"
             for label, vid in vmap.items():
                 if vid == self.tts_voice:
                     cur = label
             voice_box.set(cur)
+
+        def filter_voices(_e=None):
+            # type-to-find: 283 voices is not a scrolling job, least of
+            # all one-handed ("I had to manually scroll with a broken hand
+            # all the way down to Selene" — Ren, 8/17; their own dictation
+            # misspelled the voice's name while they said it, which is the
+            # whole product thesis in one anecdote). Type a few letters,
+            # the list shrinks to matches, pick from five instead of 283.
+            allv = getattr(voice_box, "_all_labels", None) or []
+            txt = voice_box.get().strip().lower()
+            if not txt or txt == "(default)":
+                voice_box["values"] = allv
+                return
+            hits = [l for l in allv if txt in l.lower()]
+            voice_box["values"] = hits or allv
 
         def refresh():
             eng = eng_var.get()
@@ -1633,6 +1791,10 @@ class App:
         tk.Button(btns, text="Cancel", font=("Segoe UI", 10),
                   command=d.destroy).pack(side="left", padx=4)
         btns.pack(pady=10)
+        # dialogs are when hooks die (typing + audio tests + CPU spikes) —
+        # re-arm the instant this closes rather than waiting for the watchdog
+        d.bind("<Destroy>", lambda e: (e.widget is d) and
+               self.root.after(400, self._arm_hotkeys))
         refresh()
 
     # -------- menu
@@ -1848,35 +2010,67 @@ class App:
         Mechanics: preserve the clipboard, ask the focused app to copy the
         selection, harvest it, append to the dictionary, put the user's
         clipboard back exactly as found."""
-        old_clip = None
-        try:
-            old_clip = self.root.clipboard_get()
-        except Exception:
-            pass
+        log("addword: fired")
+        # RAW Win32 clipboard, deliberately NOT tk's: tk's clipboard_clear
+        # takes clipboard OWNERSHIP, and this handler then sleeps on tk's
+        # own event thread — so when the target app answered our Ctrl+C,
+        # Windows asked the owner (tk) to respond and tk couldn't, because
+        # we were the ones holding its loop. A self-inflicted deadlock that
+        # reported every real selection as "nothing highlighted" (the
+        # injection tested PERFECT in isolation). No clearing, no
+        # ownership: snapshot, inject, watch for CHANGE.
+        def clip_read():
+            try:
+                import win32clipboard
+                for _ in range(4):
+                    try:
+                        win32clipboard.OpenClipboard()
+                        try:
+                            if win32clipboard.IsClipboardFormatAvailable(
+                                    win32clipboard.CF_UNICODETEXT):
+                                return win32clipboard.GetClipboardData(
+                                    win32clipboard.CF_UNICODETEXT)
+                            return ""
+                        finally:
+                            win32clipboard.CloseClipboard()
+                    except Exception:
+                        time.sleep(0.03)
+            except Exception:
+                pass
+            return ""
+        old_clip = clip_read()
         try:
             if keyboard:
-                # WAIT for the user's fingers to actually leave the keys.
-                # v1 virtually released Ctrl/Alt while they were physically
-                # held — a race with two losing outcomes, both hit by Ren
-                # within one minute of testing: Alt released first turned
-                # the held A into Ctrl+A (selected the whole paragraph);
-                # both released turned key-repeat into a plain "a" typed
-                # over the selection. Patience instead of puppetry.
+                # WAIT for the user's fingers to actually leave the keys —
+                # virtually releasing held modifiers turned the held A into
+                # select-all. Patience instead of puppetry.
                 deadline = time.time() + 1.5
                 while time.time() < deadline and any(
                         keyboard.is_pressed(k) for k in ("ctrl", "alt", "a")):
                     time.sleep(0.02)
-                self.root.clipboard_clear()
                 keyboard.send("ctrl+c")
-                time.sleep(0.18)
+            # poll for the copy to LAND (Electron/terminals write async)
             word = ""
-            try:
-                word = self.root.clipboard_get().strip()
-            except Exception:
-                pass
+            polls = 0
+            for polls in range(1, 13):
+                time.sleep(0.09)
+                cur = (clip_read() or "").strip()
+                if cur and cur != (old_clip or "").strip():
+                    word = cur
+                    break
+            log(f"addword: copy changed clipboard: {bool(word)} "
+                f"({len(word)} chars, {polls} polls)")
             if not word:
-                self._toast("nothing selected — highlight a word first ✏",
-                            ok=False)
+                # copy-first path: clipboard didn't CHANGE, but if what's
+                # already on it looks like a word (not a stale passage),
+                # the user copied their word before chording — honor it.
+                prior = (old_clip or "").strip()
+                if prior and len(prior) <= 60 and len(prior.split()) <= 4:
+                    word = prior
+                    log(f"addword: using pre-copied word ({len(word)} chars)")
+            if not word:
+                self._toast("nothing selected — highlight a word (or copy "
+                            "one) first ✏", ok=False)
                 return
             if len(word.split()) > 4 or len(word) > 60:
                 self._toast("that's a whole passage — select just the "
@@ -1895,13 +2089,11 @@ class App:
             log(f"dictionary += {word!r} (Ctrl+Alt+A)")
             self._toast(f"✓ added: {word}")
         finally:
-            # the user's clipboard is not ours to spend
-            try:
-                self.root.clipboard_clear()
-                if old_clip is not None:
-                    self.root.clipboard_append(old_clip)
-            except Exception:
-                pass
+            # We no longer clear the clipboard, so there is nothing to
+            # restore — the deadlock lived in tk taking ownership here.
+            # Worst case the user's clipboard now holds the word they just
+            # highlighted, which is theirs anyway.
+            pass
 
     def _edit_dictionary(self):
         """Open the personal dictionary in Notepad — the editor everyone
