@@ -1741,6 +1741,53 @@ class App:
             self.root.after(0, done)
         threading.Thread(target=worker, daemon=True).start()
 
+    # -------- settings (restored 2026-08-17 — lost as collateral damage in
+    # dc13375's 258-line minimize rework; first spotted by beta tester
+    # throwawayaccount931A on r/vibecoding within hours of the release post.
+    # Beta testing works.)
+    def _load_settings(self):
+        try:
+            with open(SETTINGS_PATH, encoding="utf-8") as f:
+                s = json.load(f)
+            self.scale = float(s.get("scale", 1.0))
+            self.theme_pref = s.get("theme_pref", "auto")
+            self.skin = s.get("skin", "illustrated")
+            self.features = s.get("features", "both")
+            self.onboarded = bool(s.get("onboarded", False))
+            self.tts_engine = s.get("tts_engine", "windows")
+            self.tts_voice = s.get("tts_voice") or None
+            self.v2_theme = s.get("v2_theme", self.v2_theme)
+            if self.v2_theme not in v2_themes() and v2_themes():
+                self.v2_theme = v2_themes()[0]
+            self.bg_dim = s.get("bg_dim", None)
+            if self.bg_dim is not None:
+                self.bg_dim = float(self.bg_dim)
+            self.private_read = bool(s.get("private_read", False))
+            p = s.get("pos")
+            if (isinstance(p, list) and len(p) == 2
+                    and all(isinstance(v, int) for v in p)):
+                self.saved_pos = tuple(p)
+        except Exception:
+            pass
+
+    def _save_settings(self):
+        try:
+            with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+                json.dump({"scale": self.scale,
+                           "theme_pref": self.theme_pref,
+                           "skin": self.skin,
+                           "features": self.features,
+                           "onboarded": self.onboarded,
+                           "tts_engine": getattr(self, "tts_engine", "windows"),
+                           "tts_voice": getattr(self, "tts_voice", None),
+                           "v2_theme": getattr(self, "v2_theme", "octopus"),
+                           "bg_dim": getattr(self, "bg_dim", None),
+                           "private_read": getattr(self, "private_read", False),
+                           "pos": (list(self.saved_pos)
+                                   if self.saved_pos else None)}, f)
+        except Exception:
+            pass
+
     def _theme_cfg(self):
         try:
             with open(os.path.join(v2_dir(self.v2_theme), "theme.json"),
