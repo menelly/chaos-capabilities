@@ -138,6 +138,43 @@ word 100% on your computer**, always, and that's why it's the default.
    telemetry, no cloud, no subscription.
 5. **Fail legibly.** When something breaks, it says what broke in plain words.
 
+## FAQ (real questions from real launch night)
+
+**"On Windows you can just press Win+H."**
+True, and we tried! Win+H times out and shuts itself off mid-thought, has
+no custom dictionary (it will never learn your meds, your doctor, or your
+D&D character), sometimes *erased* what was already said instead of
+appending, and does dictation only — no read-aloud. Chaos Capture exists
+because we used Win+H first. Just because one accessibility model exists
+doesn't mean a better one is a waste of time.
+
+**"Speech-to-text comes free with your phone."**
+Phone dictation takes two hands: one to hold the phone, one to tap the mic
+button. This was built *because* one of those hands was in a splint. Also
+your words end up on your phone, not in the document on your computer
+where you needed them.
+
+**"What about screen readers? Windows can already read aloud."**
+Windows' built-in reading narrates *everything* — menus, buttons, the whole
+page tour. This reads exactly the text you copied, then stops. Different
+tool, different job.
+
+**"Is there a Mac version?"**
+Not yet — we build on Windows because that's where we live. It's open
+source; if you want to fork it for Mac, please do! (For Mac users today,
+[VoiceLah](https://nellocastellano.com/voicelah/) covers similar ground.)
+
+**"What's the catch? Why is it free?"**
+No catch. No account, no telemetry, no subscription, no "free tier."
+Gatekeeping assistive tech is gross, and the marginal cost of a copy is
+zero. The only optional costs are bring-your-own-key cloud voices, billed
+by the provider to *your* account.
+
+**"Windows says it 'protected my PC' when I ran it."**
+That's SmartScreen objecting to an unsigned EXE (code-signing certificates
+cost hundreds of dollars a year — see "why is it free," above). Click
+**More info → Run anyway**, once. The app unblocks itself after that.
+
 ## Running from source
 
 ```
