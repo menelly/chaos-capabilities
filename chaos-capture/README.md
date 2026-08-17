@@ -38,6 +38,8 @@ That's the whole thing.
 |---|---|---|
 | Click the big button | `Ctrl+Alt+D` | start / finish a take |
 | Click the "read aloud" bar | `Ctrl+Alt+R` | your computer reads the clipboard to you |
+| Highlight a word, then — | `Ctrl+Alt+A` | **add it to your dictionary** right there (it just misspelled your doctor's name? highlight your fix, press this, done — next take knows it) |
+| — | `Ctrl+Alt+W` | keep the microphone warm (hold the Bluetooth link open) |
 | Click the ⚙ | `Ctrl+Alt+M` | menu: size, theme, dictionary, better brain, quit |
 | Drag anywhere on the widget | `Ctrl+Alt+arrows` | move it (arrows nudge it along) |
 | — | `Ctrl+Alt+1/2/3/4` | jump it to a corner (1=top-left, 2=top-right, 3=bottom-left, 4=bottom-right) |

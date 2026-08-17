@@ -983,6 +983,13 @@ class App:
                                     lambda: root.after(0, self.minimize))
                 keyboard.add_hotkey("ctrl+alt+q",
                                     lambda: root.after(0, self.shutdown))
+                keyboard.add_hotkey("ctrl+alt+w",
+                                    lambda: root.after(0, self.toggle_warm))
+                keyboard.add_hotkey("ctrl+alt+a",
+                                    lambda: root.after(
+                                        0, self.add_selection_to_dictionary),
+                                    suppress=True)  # screenshot tools etc.
+                # also bind Ctrl+Alt+A; ours must win (CHA-504)
                 for arrow, dx, dy in (("left", -40, 0), ("right", 40, 0),
                                       ("up", 0, -40), ("down", 0, 40)):
                     keyboard.add_hotkey(
@@ -1698,6 +1705,84 @@ class App:
         m.add_command(label="Quit Chaos Capture", command=self.shutdown)
         m.tk_popup(e.x_root, e.y_root)
 
+    def _toast(self, text, ok=True):
+        """Tiny self-dismissing confirmation bubble by the widget. Visible
+        feedback without a dialog to close — one hand, zero clicks."""
+        try:
+            t = tk.Toplevel(self.root)
+            t.overrideredirect(True)
+            t.attributes("-topmost", True)
+            tk.Label(t, text=text, font=("Segoe UI", 11, "bold"),
+                     bg=("#0d3a1a" if ok else "#4a1020"),
+                     fg=("#4ade80" if ok else "#ff8fa3"),
+                     padx=14, pady=8).pack()
+            t.geometry(f"+{self.root.winfo_x()}"
+                       f"+{max(0, self.root.winfo_y() - 46)}")
+            t.after(1900, t.destroy)
+        except Exception:
+            pass
+
+    def add_selection_to_dictionary(self):
+        """Ctrl+Alt+A — teach the app a word IN THE MOMENT (CHA-504).
+        You just fixed a word the engine got wrong; your hand is already on
+        it. Highlight it, hit Add, and the very next take knows it. No
+        Notepad, nothing to remember (the Grandma Jane rule: a feature that
+        requires remembering a menu exists doesn't exist).
+        Mechanics: preserve the clipboard, ask the focused app to copy the
+        selection, harvest it, append to the dictionary, put the user's
+        clipboard back exactly as found."""
+        old_clip = None
+        try:
+            old_clip = self.root.clipboard_get()
+        except Exception:
+            pass
+        try:
+            if keyboard:
+                # the user is still holding Ctrl+Alt from the hotkey —
+                # release them first or our Ctrl+C becomes Ctrl+Alt+C
+                for k in ("alt", "ctrl"):
+                    try:
+                        keyboard.release(k)
+                    except Exception:
+                        pass
+                time.sleep(0.05)
+                self.root.clipboard_clear()
+                keyboard.send("ctrl+c")
+                time.sleep(0.18)
+            word = ""
+            try:
+                word = self.root.clipboard_get().strip()
+            except Exception:
+                pass
+            if not word:
+                self._toast("nothing selected — highlight a word first ✏",
+                            ok=False)
+                return
+            if len(word.split()) > 4 or len(word) > 60:
+                self._toast("that's a whole passage — select just the "
+                            "word 📚", ok=False)
+                return
+            existing = set()
+            if os.path.exists(DICT_PATH):
+                with open(DICT_PATH, encoding="utf-8") as f:
+                    existing = {ln.strip().lower() for ln in f
+                                if ln.strip() and not ln.startswith("#")}
+            if word.lower() in existing:
+                self._toast(f"already knows: {word} ✓")
+                return
+            with open(DICT_PATH, "a", encoding="utf-8") as f:
+                f.write(word + "\n")
+            log(f"dictionary += {word!r} (Ctrl+Alt+A)")
+            self._toast(f"✓ added: {word}")
+        finally:
+            # the user's clipboard is not ours to spend
+            try:
+                self.root.clipboard_clear()
+                if old_clip is not None:
+                    self.root.clipboard_append(old_clip)
+            except Exception:
+                pass
+
     def _edit_dictionary(self):
         """Open the personal dictionary in Notepad — the editor everyone
         already knows. Commercial dictation charges a fortune for custom
@@ -1799,6 +1884,8 @@ class App:
         rows = [
             ("Ctrl + Alt + D", "start talking / finish talking"),
             ("Ctrl + Alt + R", "read the copied text out loud"),
+            ("Ctrl + Alt + A", "add the highlighted word to my dictionary"),
+            ("Ctrl + Alt + W", "keep the microphone warm (hold it open)"),
             ("Ctrl + Alt + M", "keyboard menu (arrows + Enter, Esc closes)"),
             ("Ctrl + Alt + H", "hide the widget / bring it back"),
             ("Ctrl + Alt + arrows", "nudge the widget around"),
