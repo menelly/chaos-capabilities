@@ -1048,6 +1048,179 @@ class App:
             self._refresh()
         self.root.update_idletasks()
 
+    def _save_pos(self):
+        self.saved_pos = (self.root.winfo_x(), self.root.winfo_y())
+        self._save_settings()
+
+    def _end_drag(self, e):
+        self._drag_start = None
+        self._save_pos()
+
+    # -------- drawing (this whole section restored 2026-08-17: the dc13375
+    # strip-collapse edit replaced a 258-line block that contained the ENTIRE
+    # drawing engine, not just the old minimize. First symptom reported by
+    # beta tester throwawayaccount931A within hours of release. Restored
+    # byte-identical from dc13375~1.)
+    def theme(self):
+        return windows_theme() if self.theme_pref == "auto" else self.theme_pref
+
+    def _v2_aux(self):
+        return V2_AUX3 if getattr(self, "_has_refresh", False) else V2_AUX2
+
+    def _img_v2(self, w):
+        """Nova's v2 composite: nebula background + LISTEN and READ ALOUD
+        buttons side by side + keep-warm / (refresh) / menu. Cached per
+        (mic-state, reading?, warm, width)."""
+        warm = getattr(self.rec, "warm", False)
+        reading = getattr(self, "read_active", False)
+        key = ("v2", self.v2_theme, self.state, reading, warm,
+               getattr(self, "bt_ok", False), getattr(self, "bg_dim", None), w)
+        if key not in self.imgs:
+            h = int(w * V2_ASPECT)
+            tdir = v2_dir(self.v2_theme)
+            # optional theme.json: bg_fade dims the BACKGROUND only (the art
+            # is lovely AND it's visual noise for some eyes — buttons stay
+            # full strength); button_ring draws a locator ring per control.
+            # The user's own dim choice (menu slider) overrides the theme's.
+            cfg = {}
+            try:
+                with open(os.path.join(tdir, "theme.json"),
+                          encoding="utf-8") as f:
+                    cfg = json.load(f)
+            except Exception:
+                pass
+            bg = Image.open(os.path.join(tdir, "background.png")).convert("RGBA")
+            c = bg.resize((w, h), Image.LANCZOS)
+            fade = (self.bg_dim if getattr(self, "bg_dim", None) is not None
+                    else float(cfg.get("bg_fade", 0)))
+            if fade > 0:
+                col = tuple(cfg.get("bg_fade_color", [0, 0, 0]))
+                veil = Image.new("RGBA", c.size, col + (int(255 * fade),))
+                c.alpha_composite(veil)
+            ring = cfg.get("button_ring")
+            ring_w = max(2, int(float(cfg.get("ring_width_frac", 0.012)) * w))
+
+            def draw_ring(cx, cy, r):
+                if not ring:
+                    return
+                rd = ImageDraw.Draw(c)
+                rr = r * w * 1.04
+                rd.ellipse([cx * w - rr, cy * h - rr,
+                            cx * w + rr, cy * h + rr],
+                           outline=tuple(ring), width=ring_w)
+
+            def put(name, cx, cy, r, dim=False):
+                d = int(2 * r * w)
+                p = os.path.join(tdir, name)
+                if not os.path.exists(p):
+                    # incomplete theme: borrow the piece from another theme
+                    # rather than crash — art lands incrementally
+                    for t in v2_themes():
+                        alt = os.path.join(v2_dir(t), name)
+                        if os.path.exists(alt):
+                            p = alt
+                            break
+                    else:
+                        return
+                im = Image.open(p).convert("RGBA")
+                im.thumbnail((d, d), Image.LANCZOS)
+                if dim:   # sleeping state: present but clearly not active
+                    a = im.getchannel("A").point(lambda v: int(v * 0.68))
+                    im.putalpha(a)
+                c.alpha_composite(im, (int(cx * w - im.width / 2),
+                                       int(cy * h - im.height / 2)))
+
+            put(V2_STATE_ART[self.state], *V2_MIC)
+            draw_ring(*V2_MIC)
+            put("read.png", *V2_READ, dim=not reading)
+            draw_ring(*V2_READ)
+            aux = self._v2_aux()
+            for pos in aux.values():
+                draw_ring(*pos)
+            put("keepwarm.png", *aux["warm"], dim=not warm)
+            if "refresh" in aux:
+                if getattr(self, "bt_ok", False):
+                    # green halo = the microphone link is verifiably alive
+                    # RIGHT NOW (audio frames flowing, or Windows sees the
+                    # mic). Ren, 8/15: "sometimes it's hard to know if it's
+                    # there." A good state deserves a visible name too.
+                    cx, cy, r = aux["refresh"]
+                    gx, gy = cx * w, cy * h
+                    ring = Image.new("RGBA", c.size, (0, 0, 0, 0))
+                    rd = ImageDraw.Draw(ring)
+                    for i, alpha in ((6, 60), (4, 110), (2, 200)):
+                        rr = r * w + i
+                        rd.ellipse([gx - rr, gy - rr, gx + rr, gy + rr],
+                                   outline=(74, 222, 128, alpha),
+                                   width=3)
+                    c.alpha_composite(ring)
+                put("refresh.png", *aux["refresh"])
+            put("menu.png", *aux["menu"])
+            flat = Image.new("RGBA", c.size, KEYCOL)
+            flat.alpha_composite(c)
+            self.imgs[key] = ImageTk.PhotoImage(flat.convert("RGB"))
+        return self.imgs[key]
+
+    def _refresh(self):
+        w = max(120, int(220 * self.scale))
+        art = have_art() and self.skin == "illustrated"
+        if self.skin == "illustrated" and have_v2():
+            self.card.configure(image=self._img_v2(w))
+            self._clamp_header(w)
+        else:
+            key = (self.theme(), self.state, w, art)
+            if key not in self.imgs:
+                if art:
+                    p = os.path.join(ART_DIR, ART_FILES[(key[0], key[1])])
+                    im = Image.open(p).convert("RGBA")
+                    im = im.resize((w, int(w * im.height / im.width)),
+                                   Image.LANCZOS)
+                else:
+                    im = draw_card(key[0], key[1], w)
+                flat = Image.new("RGBA", im.size, KEYCOL)
+                flat.alpha_composite(im)
+                self.imgs[key] = ImageTk.PhotoImage(flat.convert("RGB"))
+            self.card.configure(image=self.imgs[key])
+            self._clamp_header(w)
+        bkey = ("bar", self.theme(), w, art)
+        if bkey not in self.imgs:
+            if art:
+                p = os.path.join(ART_DIR, BAR_FILES["idle"])
+                bar = Image.open(p).convert("RGBA")
+                bar = bar.resize((w, int(w * bar.height / bar.width)),
+                                 Image.LANCZOS)
+            else:
+                bar = draw_bar(self.theme(), "🔊 read clipboard aloud", w)
+            flat = Image.new("RGBA", bar.size, KEYCOL)
+            flat.alpha_composite(bar)
+            self.imgs[bkey] = ImageTk.PhotoImage(flat.convert("RGB"))
+        self.read_btn.configure(image=self.imgs[bkey])
+
+    def _clamp_header(self, card_w):
+        """Header strip width = the card's width exactly (or the buttons'
+        minimum if they genuinely need more) — edges line up with the art."""
+        try:
+            need = sum(ch.winfo_reqwidth()
+                       for ch in self.header.winfo_children()
+                       if ch.winfo_manager())
+            self.header.configure(width=max(card_w, need))
+        except Exception:
+            pass
+
+    def set_state(self, s):
+        self.state = s
+        # Grandma semantics: GREEN = it hears you, amber = working. Red is
+        # reserved for genuinely-broken, which is none of these states.
+        hdr = getattr(self, "_hdr", {"bg": "#221833", "fg": "#9a86b8"})
+        colors = {"off": hdr["fg"], "on": "#4ade80", "think": "#c9a227"}
+        bgs = {"on": hdr.get("on_bg", "#0d3a1a")}
+        try:
+            self.mic_btn.config(fg=colors.get(s, hdr["fg"]),
+                                bg=bgs.get(s, hdr["bg"]))
+        except Exception:
+            pass
+        self._refresh()
+
     def toggle_warm(self):
         """Flip keep-warm; the 🔥 header button IS the indicator (bright when
         holding the link) and the card's flame glows/sleeps to match."""
@@ -1683,6 +1856,28 @@ class App:
             pass
         self.root.destroy()
 
+    def _poll_cmds(self):
+        """Command-file channel so external tools (a caregiver's script, an
+        AI assistant, a scheduled task) can ask for GRACEFUL actions instead
+        of hard-killing the process — which can wedge Bluetooth audio and
+        drop someone's hearing aids. Drop a file named cc_cmd.txt next to
+        the app containing 'quit' or 'warmoff'; it's honored within a
+        second and deleted."""
+        p = os.path.join(HERE, "cc_cmd.txt")
+        try:
+            if os.path.exists(p):
+                cmd = open(p, encoding="utf-8").read().strip().lower()
+                os.remove(p)
+                if cmd == "quit":
+                    log("graceful quit requested via cc_cmd.txt")
+                    self.shutdown()
+                    return
+                if cmd == "warmoff" and getattr(self.rec, "warm", False):
+                    self.toggle_warm()
+        except Exception:
+            pass
+        self.root.after(1000, self._poll_cmds)
+
     def _do_bt_refresh(self):
         """Run the bounce WITH visible feedback: the 🔄 goes green while the
         radio bounces (a mute button reads as a dead button — Ren, one
@@ -1872,7 +2067,8 @@ def main():
              "  (built-in Windows speech: zero installs, honest tradeoff: "
              "less accurate than the optional local model)"))
     root = tk.Tk()
-    App(root, Recorder(engine))
+    app = App(root, Recorder(engine))
+    root.after(1000, app._poll_cmds)   # graceful external quit/warmoff channel
     root.mainloop()
 
 
