@@ -66,6 +66,23 @@ def load_key(engine):
     except Exception:
         return None
 
+# ------------------------------------------------------------------ powershell
+
+def run_ps(script, *args, timeout=None):
+    """Run a PowerShell snippet WITH arguments via a temp .ps1 and -File.
+    Never use -Command with trailing args: PowerShell glues them onto the
+    script text, and a bare file path 'executed' that way ShellExecutes —
+    which is how Ctrl+Alt+R once opened the clipboard in Notepad instead of
+    reading it aloud (found by Ren, 8/15). -File passes args as $args."""
+    f = tempfile.NamedTemporaryFile("w", suffix=".ps1", delete=False,
+                                    encoding="utf-8-sig")
+    f.write(script); f.close()
+    return subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+         "-File", f.name, *[str(a) for a in args]],
+        capture_output=True, text=True, timeout=timeout,
+        creationflags=subprocess.CREATE_NO_WINDOW)
+
 # ------------------------------------------------------------------ playback
 
 _PLAY_PS = r"""
@@ -81,8 +98,7 @@ $p.Close()
 """
 
 def _play_mp3_blocking(path):
-    subprocess.run(["powershell", "-NoProfile", "-Command", _PLAY_PS, path],
-                   creationflags=subprocess.CREATE_NO_WINDOW)
+    run_ps(_PLAY_PS, path)
 
 def _chunks(text, max_len=1800):
     """Split on paragraph, then sentence boundaries, under provider limits."""
@@ -129,10 +145,10 @@ def _speak_windows(text, voice):
     f = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False,
                                     encoding="utf-8")
     f.write(text); f.close()
-    args = ["powershell", "-NoProfile", "-Command", _WIN_TTS_PS, f.name]
     if voice:
-        args.append(voice)
-    subprocess.run(args, creationflags=subprocess.CREATE_NO_WINDOW)
+        run_ps(_WIN_TTS_PS, f.name, voice)
+    else:
+        run_ps(_WIN_TTS_PS, f.name)
 
 def _speak_inworld(text, voice, key):
     import urllib.request
