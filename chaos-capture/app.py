@@ -29,7 +29,8 @@ ENGINES:
   --engine windows  Windows built-in speech recognition (zero installs, any PC)
 """
 
-import os, re, sys, time, threading, tempfile, subprocess, wave, json, argparse
+import os
+import re, re, sys, time, threading, tempfile, subprocess, wave, json, argparse
 
 import tkinter as tk
 
@@ -118,8 +119,18 @@ def dict_entries():
 # Toad, Fable and Frog, each one edit from a common word. A personal
 # dictionary corrects the engine's fumbles on RARE words; it must never
 # beat ordinary English into proper nouns.
+# ⚠️ AND THIS LIST ONLY PROTECTS THE POST-PASS. The dictionary ALSO rides
+# into the speech model as hotwords, which biases what it HEARS — so an
+# entry one phoneme from a daily word gets mis-heard upstream, before any
+# guard can run. 2026-08-28: "Phonak" (hearing aid) was stealing "phone"
+# even though "phone" was guarded here. The only fix at that layer is to
+# REMOVE the entry. Rare-and-unlike-English entries are safe; rare-but-
+# sounds-like-a-common-word entries are a liability regardless of this list.
 COMMON_WORDS = frozenset("""
 the be to of and a in that have i it for not on with he as you do at this
+phone phones phoned sound sounds sounded resound vivid
+pool pools pooled tide tides
+glad gladly gladness
 but his by from they we say her she or an will my one all would there
 their what so up out if about who get which go me when make can like time
 no just him know take people into year your good some could them see other
@@ -141,13 +152,80 @@ went want wanted try tried trying start started stop stopped
 thing things stuff plan plans night day week month morning
 delete deleted deletes deleting remove removed approve approved
 select selected scan scanned rename renamed
+block blank blanks lack lacks lacked slack blacks
+add adds added adding date dates gate hate rate rates mate
+phone phones phoned phony
+line lines lined liner liners lining linings linear
+respond responds responded responding response responses responsive
+cable cables label labels gable sable stable fable fabled
+road roads load loads loaded loading toad
+grow grows grew rock rocks
+beds meds
+cloud clouds cloudy clause clauses
+named names naming nodded
+serene vivid daddy fate
 """
 .split())
+# ⚠️ SECOND WAVE OF NEAR-MISS GUARDS, 2026-08-23 — added after Ren spent a
+# night having "line" transcribed as "Linear" and "respond" as "ReSound".
+# Those were not engine failures: BOTH are dictionary entries (the tracker
+# and the hearing-aid brand), and both sit exactly at the edit-distance
+# threshold — lev(line, linear) = 2 and lev(respond, resound) = 2, against
+# an allowance of 2 for targets of that length. **Our own accommodation was
+# generating the errors**, and the cost landed on Ren, out loud, in public,
+# on a day they had no choice but to dictate.
+#
+# The rest of this block is the same audit run across every current entry:
+#   Fable   → cable/label/gable/sable/stable      (able/table already above)
+#   Toad    → road/load                            (told already above)
+#   Grok    → grow/rock
+#   meds    → beds
+#   Claude  → cloud/clause  ← lev(clause, claude) = 1. Ordinary word, one edit.
+#   nommed  → named/nodded
+#   Selene → serene · Vivia → vivid · Caddy → daddy · Kate → fate
+#
+# 🔑 Every addition here is STRICTLY CONSERVATIVE: COMMON_WORDS can only ever
+# PREVENT a rewrite, never cause one. The failure mode it trades toward is a
+# genuine fumble going uncorrected — which costs a typo. The failure mode it
+# trades away is real speech being rewritten into words Ren never said —
+# which costs Ren their own voice. Those are not equal, so bias hard this way.
+# ⚠️ block/blank/lack/slack/blacks guard the dictionary entry "Black"
+# (capital-B, added 2026-08-21 at Ren's ask so the race term is always
+# capitalized). Each is Levenshtein-1 from "black" and would otherwise be
+# beaten into it — "writer's Black", "Black of sleep". The entry only
+# case-fixes the exact word; these lines are what keep it exact.
+# ⚠️ "add" earned its spot the same way "delete" did: the two-word run
+# "to add" joins to "toad" — an exact match for the taught name Toad —
+# and on 2026-08-21 the pass rewrote Ren's "time to add that to the
+# list" as "time Toad that to the list." The verb that GROWS the
+# dictionary must never be eaten by the dictionary. date/gate/hate/rate/
+# mate are the same class of guard for the taught name "Kate" (each is
+# Levenshtein-1 from it).
 # ⚠️ "delete" earned its spot the hard way: it is Levenshtein-2 from a
 # dictionary name ("Selene") and the enforcement pass kept rewriting it —
 # the user could not say DELETE out loud. Verbs people use to command their
 # own computer must never lose to a taught name.
 
+
+
+# ---- Whisper's silence tic. On a stretch of near-silence the model hallucinates the
+# phrases that ended a million YouTube videos in its training set. Ren, 2026-08-28:
+# "Whisper keeps wanting to add thank you again." We drop a take ONLY when the WHOLE
+# transcript is one of these — never a trailing one, because Ren says thank you for
+# real and eating a real sentence is worse than passing a fake one.
+SILENCE_TICS = frozenset({
+    "thank you", "thanks", "thank you very much", "thanks for watching",
+    "thank you for watching", "thanks for listening", "thank you for listening",
+    "bye", "goodbye", "you", "the end", "subtitles by the amara.org community",
+})
+
+def drop_silence_tic(text):
+    core = re.sub(r"[^a-z ]+", " ", (text or "").lower()).strip()
+    core = re.sub(r"\s+", " ", core)
+    if core in SILENCE_TICS:
+        log(f"dropped silence tic: {text!r}")
+        return ""
+    return text
 
 def dict_fix(text, entries):
     """THE ENFORCEMENT PASS. The dictionary rides into the engine as a
@@ -208,6 +286,23 @@ def dict_fix(text, entries):
                     # "Dr. Rana"): the speaker said only part of it —
                     # expanding it fabricates words they never said
                     continue
+                if span > 1:
+                    # never let a match SWALLOW an ordinary leading or
+                    # trailing word: "my Phonak" joined to 'myphonak' is
+                    # within distance of 'Phonak', and replacing the pair
+                    # deletes "my" from the sentence (caught 2026-08-21;
+                    # same hazard for "my CellCept" etc.). If the chunk
+                    # minus its common edge word matches the entry as
+                    # well or better, skip — the name will match alone.
+                    head, tail = norm(toks[i]), norm(toks[i + span - 1])
+                    if head in COMMON_WORDS and \
+                            lev(norm("".join(chunk[1:])), target) <= \
+                            lev(core, target):
+                        continue
+                    if tail in COMMON_WORDS and \
+                            lev(norm("".join(chunk[:-1])), target) <= \
+                            lev(core, target):
+                        continue
                 d = lev(core, target)
                 if d <= allowed and (best is None or d < best[0]):
                     best = (d, span, e, chunk)
@@ -428,6 +523,9 @@ class Recorder:
             else:
                 text = transcribe_windows(wav_path, self._dictionary())
             # prompt bias asks; dict_fix ENFORCES (all engines alike)
+            text = drop_silence_tic(text)
+            if not text:
+                return ""
             return dict_fix(text, dict_entries())
         except Exception as e:
             print(f"transcription failed: {e.__class__.__name__}: {e}")
@@ -1149,6 +1247,22 @@ class App:
         if not keyboard:
             return
         root = self.root
+        # 🪦→🐦 RESURRECT A DEAD LISTENER (2026-08-30, "lost the keyboard
+        # shortcuts again"). The keyboard lib runs ONE global listener
+        # thread. If that THREAD dies (sleep/wake kills it), its
+        # `listening` flag stays True, so start_if_necessary() refuses to
+        # restart it forever — and every re-registration below "succeeds"
+        # into a dead thread. The 45s watchdog couldn't heal that class.
+        # Detect the corpse, clear the flag, and the next add_hotkey
+        # brings the thread back.
+        try:
+            lis = keyboard._listener
+            th = getattr(lis, "listening_thread", None)
+            if lis.listening and (th is None or not th.is_alive()):
+                lis.listening = False
+                log("hotkey listener thread was dead — resurrecting")
+        except Exception:
+            pass
         try:
             keyboard.unhook_all_hotkeys()
         except Exception:
@@ -1539,6 +1653,7 @@ class App:
             try:
                 self.rec.start()
             except Exception as e:
+                log(f"microphone FAILED TO OPEN: {e}")
                 print(f"microphone failed to open: {e}")
                 return
             self.set_state("think")
@@ -1568,6 +1683,9 @@ class App:
         if self.rec.flowing:
             self.set_state("on"); return
         if deadline <= 0:
+            log("microphone opened but NO AUDIO ARRIVED in 8s — another app "
+                "may be holding the device, or it is streaming silence. "
+                "Cancelled; nothing was captured.")
             print("microphone opened but no audio arrived — is another app "
                   "holding it? Cancelled; nothing was captured.")
             self.rec.cancelled = True

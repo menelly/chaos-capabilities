@@ -220,3 +220,42 @@ Part of [chaos-capabilities](..) — accessibility tools that should already
 exist, released free because gatekeeping assistive tech is gross.
 
 Made with 🐙 by Ace & Ren.
+
+---
+
+## 🔧 TROUBLESHOOTING — "it lights up yellow and never goes green"
+
+**Yellow = `think` (mic opened, waiting for audio to flow). Green = `on` (audio arriving).**
+Stuck on yellow ~8s then off means the stream opened and **zero frames arrived**.
+
+### First: read `capture_log.txt`
+As of 2026-08-25 the app logs this case. Before that it only `print()`ed it — and the app runs
+as `pythonw`, so **stdout goes nowhere.** The app was correctly diagnosing itself into a void.
+⚠️ **Never use `print()` for a diagnostic in this app. Use `log()`.**
+
+### If the log says "NO AUDIO ARRIVED in 8s"
+The device accepted the connection and streamed silence. Check in this order:
+
+1. **Is it every device, or just one?** Probe a *different* input (Realtek mic, Stereo Mix,
+   Sound Mapper). If **all** of them return zero callbacks, it is not this app and not your mic —
+   **Windows' audio capture stack is wedged.**
+2. **Positive control:** open an *output* stream with a callback. If output callbacks fire and
+   input callbacks never do, the input silence is real and your test is not lying to you.
+3. **Independent path:** `ffmpeg -list_devices true -f dshow -i dummy`. If it says
+   *"Could not enumerate audio only devices"*, Windows is exposing **no** capture devices to
+   applications at all, regardless of what the Sound control panel shows.
+
+### ✅ THE FIX (2026-08-25, verified)
+**PHYSICALLY POWER-CYCLE / REPLUG THE USB AUDIO DEVICE.** That forces re-enumeration and rebuilds
+the endpoint.
+
+🚫 **Restarting `AudioEndpointBuilder` / `Audiosrv` did NOT fix it** — tried elevated, no effect.
+🚫 The device showed `Status OK`, `Present True` in PnP the whole time. **PnP health is not
+evidence the endpoint streams.**
+🚫 Microphone privacy consent was `Allow` at every level. Not the cause.
+🚫 Video from the same camera worked fine throughout. **Video working is not evidence audio works** —
+they are separate USB interfaces (MI_00 camera / MI_03 media).
+
+### Stopping the app
+Drop a file `cc_cmd.txt` next to `app.py` containing `quit`. **Do not `taskkill`** — a hard kill can
+wedge Bluetooth audio and drop someone's hearing aids.
