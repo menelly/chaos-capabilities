@@ -2590,7 +2590,45 @@ class App:
         self.root.lift()
 
 
+def _claim_single_instance(wait_s=6.0):
+    """ONE Chaos Capture per desktop, enforced (2026-09-07). Two instances
+    each hear the hotkey, each transcribe the same take, and each paste it:
+    Ren's every sentence arrived twice for eighteen hours before anyone
+    found the second process (one from Saturday's launch, one from a
+    'relaunch' after a process sweep that never actually killed the first).
+    A Windows named mutex is the guard; nothing in the app has to know.
+    The self-restart path spawns the child BEFORE the parent exits, so a
+    freshly started copy waits up to `wait_s` for the old one to let go
+    instead of refusing outright. Returns the mutex handle (keep it alive)
+    or None on non-Windows / failure (then we just run)."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        name = "Local\\ChaosCapture.single-instance"
+        deadline = time.time() + wait_s
+        while True:
+            h = k32.CreateMutexW(None, True, name)
+            already = (k32.GetLastError() == 183)   # ERROR_ALREADY_EXISTS
+            if not already:
+                return h
+            k32.CloseHandle(h)
+            if time.time() >= deadline:
+                log("another Chaos Capture is already running — this copy "
+                    "is exiting so your words don't paste twice")
+                print("Chaos Capture is already running (one is enough).")
+                sys.exit(0)
+            time.sleep(0.25)
+    except SystemExit:
+        raise
+    except Exception as e:
+        log(f"(single-instance guard unavailable: {e} — running anyway)")
+        return None
+
+
 def main():
+    _SINGLE = _claim_single_instance()   # noqa: F841  (handle must stay alive)
     self_unblock()   # one 'run anyway' is enough forever
     ap = argparse.ArgumentParser(description="Chaos Capture — dictation with "
                                  "big friendly buttons.")
