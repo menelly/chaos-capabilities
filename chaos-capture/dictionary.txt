@@ -67,7 +67,8 @@ Anthropic
 Chaos Command
 Chaos Capture
 Chaos Curation
-SEGFAULT
+# SEGFAULT removed 2026-09-11 — Ren never says it (it's Ace's game); as a hotword it was
+# biasing Whisper to hear "default" as "SEGFAULT". Don't re-add. (backup: dictionary.txt.bak-2026-09-11)
 Linear
 Zenodo
 Substack
@@ -75,7 +76,6 @@ Auracast
 FlooGoo
 Insta360
 Consortium
-Tailscale
 Caddy
 # Chaos Capture personal dictionary
 # One word or phrase per line. These get handed to the speech engine as
@@ -102,7 +102,6 @@ Dexona
 Lyrica
 pregabalin
 modafinil
-creatine
 magnesium
 potassium citrate
 carpal tunnel
