@@ -60,6 +60,44 @@ SETTINGS_PATH = os.path.join(HERE, "capture_settings.json")
 LOG_PATH = os.path.join(HERE, "capture_log.txt")
 
 
+# ---- audio prefs (2026-09-12: "it's too loud to use speech-to-text in there")
+# Two OPTIONAL keys in capture_settings.json, both off unless set, so nothing
+# changes for anyone who hasn't asked:
+#   "input_device":  a substring of the mic's name (e.g. "fifine", "Beats",
+#                    "Phonak") or an integer index -> that mic instead of the
+#                    Windows default. Close mic beats a loud room.
+#   "vad_threshold": 0.0-1.0 (faster-whisper VAD; default ~0.5). Higher = the
+#                    model needs to be MORE sure a stretch is speech before it
+#                    transcribes it -> fewer shouted-across-the-room words.
+#                    0.7 is a sane "someone is on Roblox" setting.
+def audio_prefs():
+    try:
+        with open(SETTINGS_PATH, encoding="utf-8") as f:
+            s = json.load(f)
+        return {"input_device": s.get("input_device"),
+                "vad_threshold": s.get("vad_threshold")}
+    except Exception:
+        return {"input_device": None, "vad_threshold": None}
+
+
+def resolve_input_device():
+    """Turn the input_device pref into a sounddevice index, or None (default)."""
+    want = audio_prefs().get("input_device")
+    if want in (None, "", "default"):
+        return None
+    try:
+        import sounddevice as _sd
+        if isinstance(want, int):
+            return want
+        want_l = str(want).lower()
+        for i, d in enumerate(_sd.query_devices()):
+            if d.get("max_input_channels", 0) > 0 and want_l in d["name"].lower():
+                return i
+    except Exception:
+        pass
+    return None
+
+
 def self_unblock():
     """Strip the mark-of-the-web from ourselves and our files on first
     successful run. The user already said 'run anyway' ONCE to get here —
@@ -327,10 +365,14 @@ def transcribe_local(wav_path, hotwords):
     global _MODEL
     if "_MODEL" not in globals():
         _MODEL = WhisperModel("distil-large-v3", device="auto", compute_type="default")
+    vad_kw = {}
+    thr = audio_prefs().get("vad_threshold")
+    if isinstance(thr, (int, float)) and 0.0 < float(thr) < 1.0:
+        vad_kw = {"vad_parameters": {"threshold": float(thr)}}
     segs, _ = _MODEL.transcribe(
         wav_path, language="en", vad_filter=True,
         condition_on_previous_text=False,
-        hotwords=hotwords or None)
+        hotwords=hotwords or None, **vad_kw)
     return " ".join(s.text.strip() for s in segs).strip()
 
 
@@ -455,7 +497,8 @@ class Recorder:
             return
         self.frames = []; self.cancelled = False; self.flowing = False
         self.stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1,
-                                     dtype="int16", callback=self._callback)
+                                     dtype="int16", callback=self._callback,
+                                     device=resolve_input_device())
         self.stream.start()
         self.recording = True
 
