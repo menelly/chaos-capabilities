@@ -1,0 +1,42 @@
+# chaos-capture personal dictionary — one term per line, # comments ignored.
+# These words/names bias the speech model's spelling toward YOUR world.
+# Edit freely; takes effect next app start.
+#
+# HOW TO USE: copy this file to `dictionary.txt` next to ChaosCapture.exe and
+# replace the examples with your own words. Or skip this entirely: the app
+# creates dictionary.txt for you the first time you press Ctrl+Alt+A on a
+# highlighted word, and the ⚙ menu → 📖 My dictionary opens it in Notepad.
+#
+# Your dictionary.txt is YOURS — it is deliberately not part of the repo, because
+# it fills up with the names of the people in your life.
+
+# style — a word you always want capitalized a particular way
+Black
+
+# people (first names the model keeps misspelling)
+Siobhan
+Xiomara
+Dmitri
+
+# pets
+Mochi
+
+# places
+Poughkeepsie
+Tallahassee
+
+# medications and conditions (spell them once here, never again)
+levothyroxine
+metoprolol
+sertraline
+fibromyalgia
+hypothyroidism
+
+# your projects, products, handles
+ChaosCapture
+GitHub
+faster-whisper
+
+# short all-caps entries are risky: they bias ordinary words toward themselves.
+# e.g. an entry "DEFAULT" will start turning "the fault" into "DEFAULT". If a
+# word keeps appearing where it shouldn't, look here first and delete the entry.

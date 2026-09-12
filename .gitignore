@@ -1,2 +1,8 @@
 chaos-capture/voice_keys.dat
 chaos-capture/voice_catalog.json
+chaos-capture/dictionary.txt
+chaos-capture/dictionary.txt.bak-*
+chaos-capture/capture_log.txt
+chaos-capture/cc_*.log
+chaos-capture/audio_restart.flag
+chaos-capture/app.py.bak-*

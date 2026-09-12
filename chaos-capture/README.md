@@ -59,6 +59,11 @@ your proper nouns — your doctor, your meds, your D&D character — one per
 line, save, done. Your next dictation take knows them. The speech engine
 wasn't raised on your life; this file introduces it.
 
+Your `dictionary.txt` lives next to the EXE and is **yours** — it's not in this
+repo (it fills up with the names of the people in your life). `dictionary.example.txt`
+shows the format; copy it to `dictionary.txt` if you want a head start, or just
+press Ctrl+Alt+A on a word and the app creates the file for you.
+
 (Commercial dictation software charges hundreds of dollars for custom
 vocabulary. Here it is a text file, because that's all it ever was.)
 
