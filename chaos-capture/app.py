@@ -32,6 +32,21 @@ ENGINES:
 import os
 import re, re, sys, time, threading, tempfile, subprocess, wave, json, argparse
 
+# 🪟 WINDOWLESS = NO STDERR. Under pythonw, sys.stderr is None, so when a
+# library callback throws (the audio driver's "done", 2026-09-13), cffi has
+# nowhere to print and throws a "Python-CFFI error" dialog at Ren mid-review
+# instead — with no hint which program it came from. Send it to a log file.
+if sys.stderr is None or sys.stdout is None:
+    try:
+        _errlog = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "cc_err.log"),
+                       "a", buffering=1, encoding="utf-8")
+        if sys.stderr is None:
+            sys.stderr = _errlog
+        if sys.stdout is None:
+            sys.stdout = _errlog
+    except OSError:
+        pass
+
 import tkinter as tk
 
 try:
@@ -165,6 +180,7 @@ def dict_entries():
 # REMOVE the entry. Rare-and-unlike-English entries are safe; rare-but-
 # sounds-like-a-common-word entries are a liability regardless of this list.
 COMMON_WORDS = frozenset("""
+mine yours ours hers theirs
 the be to of and a in that have i it for not on with he as you do at this
 phone phones phoned sound sounds sounded resound vivid
 pool pools pooled tide tides
