@@ -202,6 +202,7 @@ beds meds
 cloud clouds cloudy clause clauses
 named names naming nodded
 serene vivid daddy fate
+redo redoes redid redone redoing tore tour doll dole
 """
 .split())
 # ⚠️ SECOND WAVE OF NEAR-MISS GUARDS, 2026-08-23 — added after Ren spent a
@@ -221,6 +222,12 @@ serene vivid daddy fate
 #   Claude  → cloud/clause  ← lev(clause, claude) = 1. Ordinary word, one edit.
 #   nommed  → named/nodded
 #   Selene → serene · Vivia → vivid · Caddy → daddy · Kate → fate
+#   toradol → redo/tore/tour/doll/dole  (2026-09-13: "to redo" joined to
+#             'toredo', lev 2 from 'toradol', twice in one morning while Ren
+#             talked about REDOING an export — Ren: "to and redo should not
+#             combine into a drug name that I rarely take." A wrong DRUG name
+#             in a dictated sentence is worse than a wrong name: it can end up
+#             in a medical note.)
 #
 # 🔑 Every addition here is STRICTLY CONSERVATIVE: COMMON_WORDS can only ever
 # PREVENT a rewrite, never cause one. The failure mode it trades toward is a
