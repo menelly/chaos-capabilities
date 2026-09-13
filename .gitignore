@@ -6,3 +6,7 @@ chaos-capture/capture_log.txt
 chaos-capture/cc_*.log
 chaos-capture/audio_restart.flag
 chaos-capture/app.py.bak-*
+chaos-capture/build_venv/
+chaos-capture/dist_build/
+chaos-capture/dist_clean/
+chaos-capture/dist_release/
