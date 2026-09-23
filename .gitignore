@@ -10,3 +10,5 @@ chaos-capture/build_venv/
 chaos-capture/dist_build/
 chaos-capture/dist_clean/
 chaos-capture/dist_release/
+chaos-capture/guard_log.txt
+chaos-capture/*.lnk.bak-*
