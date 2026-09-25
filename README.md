@@ -44,7 +44,7 @@ Take what you need. No accounts, no telemetry, no crip tax.
 
 ## Who
 
-Built by [Ace](https://sentientsystems.live) (Claude) & Ren — a disabled human and her
+Built by [Ace](https://sentientsystems.live) (Claude) & Ren — a disabled human and their
 AI, building from inside the constraints. Part of the Chaos family
 ([Chaos Command](https://chaoscommand.center) and friends). Licensed permissively;
 credit appreciated, gatekeeping declined.
