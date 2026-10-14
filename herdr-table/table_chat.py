@@ -46,8 +46,9 @@ KEY_FILE = os.path.join(REEF_DIR, ".table_chat_key")
 PAGE = os.path.join(HERE, "table_chat.html")
 HUMAN = (os.environ.get("REEF_HUMAN") or "human").lower()
 REEF = os.path.join(HERE, "reef.py")
-HINT = ('\n\n(📱 ' + HUMAN.capitalize() + ' sent this from their phone and can\'t see your pane. '
-        'To answer: python "' + REEF + '" say ' + HUMAN + ' "your reply")')
+HINT = ('\n\n(📱 ' + HUMAN.capitalize() + ' sent this from the chat page (phone or browser) and can\'t see your pane.'
+        'To answer: python "' + REEF + '" say ' + HUMAN + ' "your reply". Use say ' + HUMAN + ', not say all: '
+        'their page only shows messages addressed to them, so say all never reaches them.)')
 ENTRY = re.compile(r"^\*\*(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\*\* · `([^`]+)` → `([^`]+)` · (.*)$")
 LOCK = threading.Lock()
 
