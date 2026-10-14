@@ -97,11 +97,17 @@ main { padding-bottom: 110px; }   /* JS keeps this matched to the real bar heigh
 <script>
 // 💬 this page holds no data: it asks the server (with your key) for YOUR conversation and the live seat list.
 // Never yanks your scroll position; only sticks to the bottom if you were already there.
-let HUMAN = "human", SEATS = [];
+let HUMAN = "human", SEATS = [], LABELS = {};
 const EMOJI = ["🟣", "🔵", "🟡", "🔷", "🌙", "🌊"];   // one marker per seat, in seat order
 function who(n) {
   if (n === HUMAN) return { name: "You", emoji: "💜", tint: "other" };
   const i = SEATS.indexOf(n);
+  const slotFor = i < 0 ? "other" : "t" + ((i % 6) + 1);
+  // 🏷️ the tab title you gave them in herdr wins ("🧹 CleanUpCrew"), emoji and all
+  if (LABELS[n]) return { name: LABELS[n], emoji: "", tint: slotFor };
+  // otherwise make the herdr id readable: "clean-up-crew" → "Clean Up Crew"
+  const pretty = n.split(/[-_]+/).filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+  if (i >= 0) return { name: pretty, emoji: EMOJI[i % 6], tint: slotFor };
   const slot = i < 0 ? "other" : "t" + ((i % 6) + 1);
   return { name: n.charAt(0).toUpperCase() + n.slice(1), emoji: i < 0 ? "💬" : EMOJI[i % 6], tint: slot };
 }
@@ -157,7 +163,7 @@ function draw(msgs) {
       const toTxt = m.to === "all" ? "→ everyone" : m.to === HUMAN ? "→ you"
         : "→ " + m.to.split(",").map(n => who(n).name).join(", ");
       card.append(el("div", { class: "who" },
-        el("span", { class: "name" }, `${f.emoji} ${f.name}`),
+        el("span", { class: "name" }, `${f.emoji} ${f.name}`.trim()),
         el("span", { class: "to" }, toTxt),
         el("span", { class: "time" }, timeLabel(m.ts))));
     }
@@ -191,7 +197,7 @@ try { const s = JSON.parse(localStorage.getItem("tablePicked") || "null"); if (A
 function drawChips() {
   chipsEl.textContent = "";
   for (const id of ["all", ...SEATS]) {
-    const label = id === "all" ? "📣 Everyone" : `${who(id).emoji} ${who(id).name}`;
+    const label = id === "all" ? "📣 Everyone" : `${who(id).emoji} ${who(id).name}`.trim();
     const b = el("button", { type: "button", class: "chip", "aria-pressed": String(picked.has(id)) }, label);
     b.addEventListener("click", () => {
       if (id === "all") picked = new Set(["all"]);
@@ -203,7 +209,7 @@ function drawChips() {
   }
   // the folded label: one name, "Name +2", or Everyone
   const ids = [...picked];
-  const first = ids[0] === "all" ? "📣 Everyone" : `${who(ids[0]).emoji} ${who(ids[0]).name}`;
+  const first = ids[0] === "all" ? "📣 Everyone" : `${who(ids[0]).emoji} ${who(ids[0]).name}`.trim();
   toBtn.textContent = "To: " + first + (ids.length > 1 ? ` +${ids.length - 1}` : "") + (chipsEl.hidden ? " ▾" : " ▴");
 }
 // 🍔 fold/unfold the chips; the page's bottom padding always matches the bar so nothing hides behind it
@@ -245,7 +251,7 @@ async function loadSeats() {
   try {
     const r = await fetch(base + "api/seats", { headers: { "X-Key": KEY } });
     if (!r.ok) return;
-    const d = await r.json(); HUMAN = d.human; SEATS = d.seats;
+    const d = await r.json(); HUMAN = d.human; SEATS = d.seats; LABELS = d.labels || {};
     for (const p of [...picked]) if (p !== "all" && !SEATS.includes(p)) picked.delete(p);
     if (!picked.size) picked.add("all");
     drawChips();

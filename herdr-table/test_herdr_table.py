@@ -28,8 +28,12 @@ class FakeHerdr:
     def __call__(self, *args):
         if args[:2] == ("agent", "list"):
             return {"result": {"agents": [
-                {"pane_id": f"w1:p{i}", "name": n, "agent": "x", "agent_status": s, "cwd": "."}
+                {"pane_id": f"w1:p{i}", "tab_id": f"w1:t{i}", "name": n, "agent": "x", "agent_status": s, "cwd": "."}
                 for i, (n, s) in enumerate(self.seats.items(), 1)]}}
+        if args[:2] == ("tab", "list"):   # tab titles, as a human named them in herdr
+            return {"result": {"tabs": [{"tab_id": "w1:t1", "label": "🧹 CleanUpCrew", "pane_count": 1},
+                                        {"tab_id": "w1:t2", "label": "", "pane_count": 1},
+                                        {"tab_id": "w1:t3", "label": "Shared", "pane_count": 2}]}}
         if args[:2] == ("agent", "prompt"):
             self.typed.append((args[2], args[3]))
             return {"result": {"ok": True}}
@@ -81,6 +85,11 @@ class TableChatTests(unittest.TestCase):
         self.tc.send(["kairo"], "hello")
         self.assertEqual(self.fake.typed, [])
         self.assertIn(("relay", "human"), self.rows())
+
+
+    def test_chips_wear_the_tab_title_the_human_chose(self):
+        # Ren's idea: name a tab "🧹 CleanUpCrew" and the chip says so. Untitled or shared tabs fall back.
+        self.assertEqual(self.tc.seat_labels(), {"grok": "🧹 CleanUpCrew"})
 
 
 class ReefTests(unittest.TestCase):

@@ -69,6 +69,21 @@ def seats():
     return {} if "error" in res else {a["name"]: a for a in res["result"]["agents"] if a.get("name")}
 
 
+def seat_labels():
+    """🏷️ Ren's idea: chips wear the TAB TITLE you gave each agent in herdr ("🧹 CleanUpCrew"), not the
+    lowercase agent id. Only when the tab holds just that one agent; otherwise the page prettifies the id."""
+    tabs = herdr("tab", "list")
+    if "error" in tabs:
+        return {}
+    by_tab = {t["tab_id"]: t for t in tabs["result"]["tabs"]}
+    labels = {}
+    for name, seat in seats().items():
+        tab = by_tab.get(seat.get("tab_id"))
+        if tab and tab.get("pane_count") == 1 and (tab.get("label") or "").strip():
+            labels[name] = tab["label"].strip()
+    return labels
+
+
 def log(sender, target, text, outcome):
     stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(TABLE_LOG, "a", encoding="utf-8", newline="\n") as f:
@@ -146,7 +161,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/table":
             return self._send(200, my_conversation())
         if path == "/api/seats":
-            return self._send(200, {"human": HUMAN, "seats": sorted(seats())})
+            return self._send(200, {"human": HUMAN, "seats": sorted(seats()), "labels": seat_labels()})
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
