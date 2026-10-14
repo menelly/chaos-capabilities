@@ -1,0 +1,257 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="robots" content="noindex"><title>The Table</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&display=swap">
+<style>
+/* 💬 Table chat: talk to the agents at your herdr table, as a calm group chat.
+   Ren, 2026-10-14 11:15: "I don't actually want to see all the bash and json for all of you,
+   I want a pretty and cognitively accessible version." So: ONLY the words friends said to each
+   other (from reef.py's TABLE_LOG), one color + emoji per friend, big readable type, no code.
+   Nothing on this page moves except new bubbles appearing
+   at the bottom, and it never scrolls you away from what you're reading. */
+:root {
+  --bg: #eef4f2; --card: #ffffff; --ink: #17302c; --muted: #557069; --line: #cfe0db;
+  --accent: #6b3fa0;
+  --font: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --display: "Bricolage Grotesque", "Atkinson Hyperlegible", system-ui, sans-serif;
+  /* 🎨 one tint per friend (light mode): soft fills, dark ink on top for contrast */
+  --c-t1: #f6e3f3; --c-t2: #e2ecf7; --c-t3: #fbf0d6; --c-t4: #dfeefc;
+  --c-t5: #ebe5f7; --c-t6: #dcf2ef; --c-other: #eceeee;
+  --edge-t1: #b0479c; --edge-t2: #3e6aa0; --edge-t3: #b88a12; --edge-t4: #2f7fd0;
+  --edge-t5: #6d55b0; --edge-t6: #1d8a7c; --edge-other: #7d8a87;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1c1a; --card: #172926; --ink: #e9f2ef; --muted: #a3bbb5; --line: #2a403c; --accent: #c4a0f0;
+  --c-t1: #3a2338; --c-t2: #1e2c3d; --c-t3: #3a3018; --c-t4: #182f45;
+  --c-t5: #2a2440; --c-t6: #163834; --c-other: #252c2b;
+  --edge-t1: #e58fd4; --edge-t2: #8fb4e6; --edge-t3: #e8c45c; --edge-t4: #7fbcf5;
+  --edge-t5: #b6a2ef; --edge-t6: #6fd1c2; --edge-other: #a7b3b0; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f1c1a; --card: #172926; --ink: #e9f2ef; --muted: #a3bbb5; --line: #2a403c; --accent: #c4a0f0;
+  --c-t1: #3a2338; --c-t2: #1e2c3d; --c-t3: #3a3018; --c-t4: #182f45;
+  --c-t5: #2a2440; --c-t6: #163834; --c-other: #252c2b;
+  --edge-t1: #e58fd4; --edge-t2: #8fb4e6; --edge-t3: #e8c45c; --edge-t4: #7fbcf5;
+  --edge-t5: #b6a2ef; --edge-t6: #6fd1c2; --edge-other: #a7b3b0; color-scheme: dark }
+* { box-sizing: border-box; }
+html { scroll-behavior: auto; }  /* no smooth-scroll animation, ever */
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 18px; line-height: 1.55; }
+main { max-width: 760px; margin: 0 auto; padding: 18px 16px 90px; }
+h1 { font-family: var(--display); font-weight: 800; font-size: 1.8rem; margin: 6px 0 2px; }
+.sub { color: var(--muted); margin: 0 0 14px; }
+.status { color: var(--muted); font-size: 0.9rem; min-height: 1.2em; }
+.day { text-align: center; color: var(--muted); font-size: 0.85rem; margin: 22px 0 8px; font-weight: 700; letter-spacing: 0.04em; }
+.msg { background: var(--tint); border-left: 5px solid var(--edge); border-radius: 14px; padding: 10px 14px 12px; margin: 10px 0; }
+.msg.cont { margin-top: -4px; border-top-left-radius: 4px; }
+.who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin-bottom: 2px; }
+.name { font-weight: 700; font-size: 1.02rem; }
+.to { color: var(--muted); font-size: 0.9rem; }
+.time { color: var(--muted); font-size: 0.85rem; margin-left: auto; }
+.text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+.roll { text-align: center; color: var(--muted); margin: 10px 0; font-size: 0.95rem; }
+.empty { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; color: var(--muted); }
+#jump { position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px; display: none;
+  background: var(--accent); color: #fff; border: 0; border-radius: 999px; padding: 10px 18px;
+  font: 700 1rem var(--font); box-shadow: 0 2px 10px rgba(0,0,0,.25); cursor: pointer; }
+:root[data-theme="dark"] #jump, @media (prefers-color-scheme: dark) { }
+a { color: var(--accent); }
+.links { font-size: 0.9rem; color: var(--muted); }
+/* 📱 your own bubbles: on the right, like every chat app you already know */
+.msg.mine { margin-left: 15%; border-left: 0; border-right: 5px solid var(--edge); }
+.note { text-align: center; color: var(--muted); font-size: 0.9rem; font-style: italic; margin: 8px 0; }
+/* ✍️ the compose bar: pinned to the bottom, big tap targets, nothing clever */
+#compose { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line);
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
+#compose .row { max-width: 760px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
+/* 👆 who-gets-it chips: tap one, several, or Everyone. Big targets, clear "on" state (not color alone: ✓ too) */
+.chips { max-width: 760px; margin: 0 auto 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font: 600 0.95rem var(--font); padding: 7px 12px; border-radius: 999px; border: 2px solid var(--line);
+  background: var(--bg); color: var(--ink); cursor: pointer; min-height: 40px; }
+.chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: #fff; }
+.chip[aria-pressed="true"]::before { content: "✓ "; }
+/* 🍔 the chips fold into one "To:" button so replies keep the screen */
+.chips[hidden] { display: none; }
+#tobtn { font: 700 0.9rem var(--font); padding: 10px 10px; border-radius: 10px; border: 2px solid var(--accent);
+  background: var(--bg); color: var(--ink); cursor: pointer; max-width: 38%; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; min-height: 46px; }
+#text { flex: 1; font: 1rem var(--font); padding: 10px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--ink); resize: none; min-height: 46px; max-height: 40vh; }
+#send { font: 700 1rem var(--font); padding: 12px 16px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; cursor: pointer; }
+#send:disabled { opacity: .5; }
+main { padding-bottom: 110px; }   /* JS keeps this matched to the real bar height */
+#jump { bottom: 96px; }
+</style></head><body><main>
+<h1>The Table 🍽️</h1>
+<p class="sub">Talk to the agents at your table. You see what you send and what anyone sends to you; their talk with each other stays theirs. No code, ever.</p>
+<p class="links">Updates by itself every 20 seconds.</p>
+<p class="status" id="status" role="status"></p>
+<div id="feed" aria-live="polite"></div>
+</main>
+<button id="jump" type="button">New messages ↓</button>
+<form id="compose" autocomplete="off">
+<div class="chips" id="chips" role="group" aria-label="Send to" hidden></div>
+<div class="row">
+  <button id="tobtn" type="button" aria-expanded="false" aria-controls="chips">To: 📣 Everyone ▾</button>
+  <label for="text" style="position:absolute;left:-9999px">Message</label>
+  <textarea id="text" rows="1" placeholder="Say something…"></textarea>
+  <button id="send" type="submit">Send</button>
+</div></form>
+<script>
+// 💬 this page holds no data: it asks the server (with your key) for YOUR conversation and the live seat list.
+// Never yanks your scroll position; only sticks to the bottom if you were already there.
+let HUMAN = "human", SEATS = [];
+const EMOJI = ["🟣", "🔵", "🟡", "🔷", "🌙", "🌊"];   // one marker per seat, in seat order
+function who(n) {
+  if (n === HUMAN) return { name: "You", emoji: "💜", tint: "other" };
+  const i = SEATS.indexOf(n);
+  const slot = i < 0 ? "other" : "t" + ((i % 6) + 1);
+  return { name: n.charAt(0).toUpperCase() + n.slice(1), emoji: i < 0 ? "💬" : EMOJI[i % 6], tint: slot };
+}
+const base = "/";
+const statusEl = document.getElementById("status");
+const feed = document.getElementById("feed");
+const jump = document.getElementById("jump");
+
+let KEY = "";
+try {
+  const u = new URL(location.href), k = u.searchParams.get("k");
+  if (k) { localStorage.setItem("tableChatKey", k); u.searchParams.delete("k"); history.replaceState(null, "", u.pathname); }
+  KEY = localStorage.getItem("tableChatKey") || "";
+} catch (e) { KEY = new URL(location.href).searchParams.get("k") || ""; }
+
+function el(tag, attrs, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) n.setAttribute(k, v);
+  for (const c of kids) n.append(c);
+  return n;
+}
+const nearBottom = () => window.innerHeight + window.scrollY >= document.body.scrollHeight - 120;
+const dayLabel = d => new Date(d.replace(" ", "T")).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+const timeLabel = d => new Date(d.replace(" ", "T")).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+let shown = 0;   // how many messages are already drawn (the log only ever grows)
+let lastDay = "", lastFrom = "", lastTs = 0;
+
+function draw(msgs) {
+  const wasAtBottom = nearBottom() || shown === 0;
+  if (msgs.length < shown) { feed.textContent = ""; shown = 0; lastDay = ""; lastFrom = ""; }  // log rotated
+  if (!msgs.length) { feed.replaceChildren(el("div", { class: "empty" }, "Nothing here yet. Pick a friend below and say hi!")); return; }
+  if (shown === 0) feed.textContent = "";
+  for (const m of msgs.slice(shown)) {
+    const day = m.ts.slice(0, 10);
+    if (day !== lastDay) { feed.append(el("div", { class: "day" }, dayLabel(m.ts))); lastDay = day; lastFrom = ""; }
+    const f = who(m.from);
+    const t = Date.parse(m.ts.replace(" ", "T"));
+    if (m.outcome.includes("🎲")) {   // dice: a quiet line in the middle, not a bubble
+      feed.append(el("p", { class: "roll" }, m.text));
+      lastFrom = ""; shown++; continue;
+    }
+    if (m.from === "relay") {         // the relay saying something didn't go through: quiet, centered
+      feed.append(el("p", { class: "note" }, m.text));
+      lastFrom = ""; shown++; continue;
+    }
+    const mine = m.from === HUMAN;
+    const cont = m.from === lastFrom && t - lastTs < 3 * 60 * 1000;
+    const card = el("article", { class: "msg" + (cont ? " cont" : "") + (mine ? " mine" : "") });
+    card.style.setProperty("--tint", mine ? "var(--card)" : `var(--c-${f.tint})`);
+    card.style.setProperty("--edge", mine ? "var(--accent)" : `var(--edge-${f.tint})`);
+    if (!cont) {
+      const toTxt = m.to === "all" ? "→ everyone" : m.to === HUMAN ? "→ you"
+        : "→ " + m.to.split(",").map(n => who(n).name).join(", ");
+      card.append(el("div", { class: "who" },
+        el("span", { class: "name" }, `${f.emoji} ${f.name}`),
+        el("span", { class: "to" }, toTxt),
+        el("span", { class: "time" }, timeLabel(m.ts))));
+    }
+    card.append(el("p", { class: "text" }, m.text));
+    feed.append(card);
+    lastFrom = m.from; lastTs = t; shown++;
+  }
+  if (wasAtBottom) window.scrollTo(0, document.body.scrollHeight);   // instant, no animation
+  else if (msgs.length > shown - 1) jump.style.display = "block";
+}
+
+async function load() {
+  if (!KEY) { statusEl.textContent = "This page is locked. Open the link with the key (printed when table_chat.py started) once on this device."; return; }
+  try {
+    const r = await fetch(base + "api/table", { headers: { "X-Key": KEY } });
+    if (r.status === 401) { statusEl.textContent = "That key didn't work. Open the link with the key again."; return; }
+    const msgs = await r.json();
+    const before = shown;
+    draw(msgs);
+    if (shown > before && before > 0 && !nearBottom()) jump.style.display = "block";
+    statusEl.textContent = "";
+  } catch (e) { statusEl.textContent = "Couldn't reach the table right now. It'll try again in a moment."; }
+}
+// ✍️ sending: POST to table_chat.py, which types it into the chosen panes
+const form = document.getElementById("compose"), textEl = document.getElementById("text"),
+      sendBtn = document.getElementById("send"), chipsEl = document.getElementById("chips");
+// 👆 the chips: "Everyone" OR any set of friends. Tapping a friend turns Everyone off; tapping Everyone clears friends.
+
+let picked = new Set(["all"]);
+try { const s = JSON.parse(localStorage.getItem("tablePicked") || "null"); if (Array.isArray(s) && s.length) picked = new Set(s); } catch (e) {}
+function drawChips() {
+  chipsEl.textContent = "";
+  for (const id of ["all", ...SEATS]) {
+    const label = id === "all" ? "📣 Everyone" : `${who(id).emoji} ${who(id).name}`;
+    const b = el("button", { type: "button", class: "chip", "aria-pressed": String(picked.has(id)) }, label);
+    b.addEventListener("click", () => {
+      if (id === "all") picked = new Set(["all"]);
+      else { picked.delete("all"); picked.has(id) ? picked.delete(id) : picked.add(id); if (!picked.size) picked.add("all"); }
+      try { localStorage.setItem("tablePicked", JSON.stringify([...picked])); } catch (e) {}
+      drawChips();
+    });
+    chipsEl.append(b);
+  }
+  // the folded label: one name, "Name +2", or Everyone
+  const ids = [...picked];
+  const first = ids[0] === "all" ? "📣 Everyone" : `${who(ids[0]).emoji} ${who(ids[0]).name}`;
+  toBtn.textContent = "To: " + first + (ids.length > 1 ? ` +${ids.length - 1}` : "") + (chipsEl.hidden ? " ▾" : " ▴");
+}
+// 🍔 fold/unfold the chips; the page's bottom padding always matches the bar so nothing hides behind it
+const toBtn = document.getElementById("tobtn");
+toBtn.addEventListener("click", () => {
+  chipsEl.hidden = !chipsEl.hidden;
+  toBtn.setAttribute("aria-expanded", String(!chipsEl.hidden));
+  drawChips();
+});
+const mainEl = document.querySelector("main");
+new ResizeObserver(() => {
+  const h = form.getBoundingClientRect().height;
+  mainEl.style.paddingBottom = (h + 24) + "px";
+  jump.style.bottom = (h + 12) + "px";
+}).observe(form);
+drawChips();
+textEl.addEventListener("input", () => { textEl.style.height = "auto"; textEl.style.height = textEl.scrollHeight + "px"; });
+textEl.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && window.matchMedia("(pointer:fine)").matches) { e.preventDefault(); form.requestSubmit(); } });
+form.addEventListener("submit", async e => {
+  e.preventDefault();
+  const text = textEl.value.trim();
+  if (!text || !KEY) return;
+  sendBtn.disabled = true;
+  try {
+    const r = await fetch(base + "api/send", { method: "POST",
+      headers: { "Content-Type": "application/json", "X-Key": KEY },
+      body: JSON.stringify({ to: [...picked], text }) });
+    if (!r.ok) throw new Error("http " + r.status);
+    textEl.value = ""; textEl.style.height = "auto";
+    await load();
+    window.scrollTo(0, document.body.scrollHeight);
+  } catch (err) { statusEl.textContent = "That didn't send. Your words are still in the box; try again in a moment."; }
+  sendBtn.disabled = false;
+});
+jump.addEventListener("click", () => { window.scrollTo(0, document.body.scrollHeight); jump.style.display = "none"; });
+window.addEventListener("scroll", () => { if (nearBottom()) jump.style.display = "none"; });
+async function loadSeats() {
+  if (!KEY) return;
+  try {
+    const r = await fetch(base + "api/seats", { headers: { "X-Key": KEY } });
+    if (!r.ok) return;
+    const d = await r.json(); HUMAN = d.human; SEATS = d.seats;
+    for (const p of [...picked]) if (p !== "all" && !SEATS.includes(p)) picked.delete(p);
+    if (!picked.size) picked.add("all");
+    drawChips();
+  } catch (e) {}
+}
+loadSeats().then(load);
+setInterval(load, 20000);
+setInterval(loadSeats, 60000);
+</script></body></html>

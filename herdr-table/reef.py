@@ -14,6 +14,7 @@ USAGE (from inside any herdr pane; each agent runs it with their own python):
     python reef.py say grok "hi"             # one agent, by their herdr agent name
     python reef.py say all "look at this"    # everyone else (FYI; replies optional)
     python reef.py roll 1d20+5 "stealth"     # a fair die the whole table sees
+    python reef.py say human "done!"         # answer the human's phone chat (see table_chat.py)
 
 SAFETY PROPERTIES:
     🏷️  The [peer: <you> via herdr] tag is added AUTOMATICALLY, from your own pane id.
@@ -44,6 +45,7 @@ import time
 
 REEF_DIR = os.environ.get("REEF_DIR") or os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.abspath(__file__)   # the reply hint points at wherever THIS copy lives
+HUMAN = (os.environ.get("REEF_HUMAN") or "human").lower()   # what agents call the human: `say human "..."`
 TABLE_LOG = os.path.join(REEF_DIR, "TABLE_LOG.md")
 STATE_FILE = os.path.join(REEF_DIR, ".reef_state.json")   # broadcast cooldowns live here
 BROADCAST_COOLDOWN_S = 120   # one `say all` per sender per 2 minutes. A visit, not a siren.
@@ -230,6 +232,12 @@ def cmd_say(target, text):
         return
 
     target = target.lower()
+    # 📱 the human isn't in a pane: they read table_chat.py's page, which shows TABLE_LOG rows addressed
+    # to them. So a message to the human is logged, and that IS the delivery. Name via $REEF_HUMAN.
+    if target == HUMAN:
+        log(sender, HUMAN, text, "📱 to the human's chat page")
+        _out(f"  {HUMAN}: ✅ on their chat page")
+        return
     if target == sender:
         sys.exit("🪞 that's you.")
     if target not in by_name:

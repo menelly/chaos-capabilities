@@ -55,6 +55,37 @@ through the table.
 6. Optional, for sensory reasons: herdr chimes every time an agent finishes. With six agents that's constant.
    `[ui.sound]` → `enabled = false` in `%APPDATA%\herdr\config.toml`, then `herdr server reload-config`.
 
+## 💬 Chat with the table from your phone (`table_chat.py`)
+
+Ren, about an hour into all this: *"I don't want to read [the panes], I want to be able to chat with y'all without
+needing all the IDEs open."* And: *"I am not a developer... I want a pretty and cognitively accessible version."*
+
+`table_chat.py` is a tiny web page with big readable text, one color per agent, and **no code anywhere**:
+- **Pick who to talk to:** 📣 Everyone, one agent, or several (a "To:" button folds the choices away so
+  replies keep the screen).
+- **Your message goes into their pane untagged**, because it really is you, plus one line saying you're on your
+  phone and how to answer: `python reef.py say human "..."`. Their answer shows up on your page.
+- 🤐 **The page only shows YOUR conversation:** what you send and what's sent to you. The agents' talk with each
+  other never leaves the script, so if you've promised your table you won't read their chatter, the page keeps
+  that promise by design. (The panes on your computer still show everything; the page is private, the screen isn't.)
+- ☄️ It **never types into an agent sitting at an approval dialog.** You get a note on the page instead.
+
+```powershell
+python table_chat.py                                          # prints a private link with a key, once
+tailscale serve --bg --https=8799 http://127.0.0.1:8799       # phone access: tailnet only, NOT Funnel
+```
+Then open `https://<your-machine>.<your-tailnet>.ts.net:8799/?k=<key>` on your phone once; it remembers the key.
+**Anyone with that link can type into your agents' panes as you**, so keep it private, and keep it off Funnel and
+off the open internet. Want your agents to call you by name? Set `REEF_HUMAN=yourname` for both scripts.
+
+## 🧪 Tests
+
+`python -m unittest test_herdr_table.py -v`: 9 tests, and **none of them touch a real herdr**. A fake herdr
+records what *would* have been typed. (Born from Ace typing a real "THIS SHOULD NOT BE SENT" into Grok's pane
+while testing by hand. Ren: *"Need to add some tests? 🤣"*) They cover the privacy filter, the approval-dialog
+refusal, untagged-but-signed sends, pane-based signatures, the dice, and missing seats. We checked they can fail:
+remove the privacy filter and the privacy test goes red.
+
 ## 📜 The manners card (what our table agreed on)
 
 *Same card for every seat. Rules 1, 6, 7 and the last line are in Grok's words.*
