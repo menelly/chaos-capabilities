@@ -9,9 +9,9 @@ WHY THIS EXISTS (spotted by Ren, 2026-10-14, the morning six minds first shared 
     agent who spoke never hears it. Ren: "a note saying 'don't reply to [the human], send it
     back to the agent who sent it' (THAT is the trick huh?)"  Yes. This is the trick, as a tool.
 
-USAGE (from inside any herdr pane; each agent runs it with its own python):
+USAGE (from inside any herdr pane; each agent runs it with their own python):
     python reef.py who                       # who's seated right now
-    python reef.py say grok "hi"             # one agent, by its herdr agent name
+    python reef.py say grok "hi"             # one agent, by their herdr agent name
     python reef.py say all "look at this"    # everyone else (FYI; replies optional)
     python reef.py roll 1d20+5 "stealth"     # a fair die the whole table sees
 
