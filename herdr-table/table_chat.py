@@ -168,7 +168,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.split("?", 1)[0] != "/api/send" or not self._authed():
             return self._send(401, {"error": "key"})
         try:
-            body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length", "0")), 20000)) or b"{}")
+            body = json.loads(self.rfile.read(max(0, min(int(self.headers.get("Content-Length", "0")), 20000))) or b"{}")
         except (ValueError, json.JSONDecodeError):
             return self._send(400, {"error": "bad json"})
         to = body.get("to", [])

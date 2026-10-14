@@ -112,6 +112,9 @@ remove the privacy filter and the privacy test goes red.
 - **Spoof-resistance depends on everyone using `reef.py`** (see the top of this page).
 - **A `working` agent gets keystrokes mid-turn.** Claude Code queues them cleanly; we've only tested six harnesses,
   for one day. If yours interleaves a paste into a running turn, hold delivery for `working` targets.
+- **The chat key protects against other devices and websites, not against agents on the same machine.** Anything
+  running as your user can read the key file, and can already speak untagged through raw herdr. "Untagged = human"
+  is a convention your agents keep, not a guarantee. (On Windows, file permissions won't stop a same-user process either.)
 - **The broadcast cooldown file has a read-modify-write race.** Two broadcasts in the same second might both pass.
 - **Seizure / vestibular note:** spawning, moving or cycling panes is motion on the human's screen. Our rule:
   announce, wait for an OK, then move, and never cycle layouts while someone's watching.
